@@ -272,10 +272,24 @@ PY
     rm -rf "$site_pkgs/typing_extensions-"*.dist-info
     "$petals_venv/bin/python" -m pip install --upgrade --force-reinstall --no-deps "typing_extensions>=4.12"
   fi
-  "$petals_venv/bin/python" -m pip install --upgrade --no-deps grpcio protobuf grpcio-tools
+  "$petals_venv/bin/python" -m pip install --upgrade --no-deps grpcio "protobuf>=3.12.2,<7.0.0" grpcio-tools
   torch_spec="${BEAM_PETALS_TORCH_SPEC:-torch==2.2.2}"
   torchvision_spec="${BEAM_PETALS_TORCHVISION_SPEC:-torchvision==0.17.2}"
   torchaudio_spec="${BEAM_PETALS_TORCHAUDIO_SPEC:-torchaudio==2.2.2}"
+  # Auto-detect CUDA version and set index URL if not provided
+  if [[ -z "${BEAM_PETALS_TORCH_INDEX_URL:-}" ]] && command -v nvidia-smi >/dev/null 2>&1; then
+    cuda_ver="$(nvidia-smi 2>/dev/null | grep -oP 'CUDA Version: \K[0-9]+\.[0-9]+' || true)"
+    if [[ -n "$cuda_ver" ]]; then
+      cuda_major="${cuda_ver%%.*}"
+      if [[ "$cuda_major" -ge 12 ]]; then
+        BEAM_PETALS_TORCH_INDEX_URL="https://download.pytorch.org/whl/cu121"
+        echo "Auto-detected CUDA $cuda_ver; using torch index: $BEAM_PETALS_TORCH_INDEX_URL"
+      elif [[ "$cuda_major" -ge 11 ]]; then
+        BEAM_PETALS_TORCH_INDEX_URL="https://download.pytorch.org/whl/cu118"
+        echo "Auto-detected CUDA $cuda_ver; using torch index: $BEAM_PETALS_TORCH_INDEX_URL"
+      fi
+    fi
+  fi
   if [[ "${BEAM_PETALS_SKIP_TORCH_INSTALL:-}" != "true" ]]; then
     if [[ -n "${BEAM_PETALS_TORCH_INDEX_URL:-}" ]]; then
       "$petals_venv/bin/python" -m pip install --upgrade "$torch_spec" "$torchvision_spec" "$torchaudio_spec" --index-url "$BEAM_PETALS_TORCH_INDEX_URL"
@@ -328,6 +342,21 @@ PY
   "$petals_venv/bin/python" -m pip install --upgrade --force-reinstall \
     "${hivemind_pip_args[@]}" \
     "$hivemind_spec"
+  # Install hivemind runtime dependencies that --no-deps skips
+  "$petals_venv/bin/python" -m pip install --upgrade \
+    "configargparse>=1.2.3" \
+    "cryptography>=3.4.6" \
+    "msgpack>=0.5.6" \
+    "multiaddr>=0.0.9" \
+    "prefetch-generator>=1.0.1" \
+    "pymultihash>=0.8.2" \
+    "scipy>=1.2.1" \
+    "sortedcontainers" \
+    "psutil" \
+    "protobuf>=3.12.2,<7.0.0"
+  if [[ "$(uname -s)" == "Linux" ]]; then
+    "$petals_venv/bin/python" -m pip install --upgrade "uvloop>=0.14.0"
+  fi
   "$petals_venv/bin/python" -m pip install --upgrade --force-reinstall "$pydantic_spec"
   patch_falcon_mqa="${BEAM_PETALS_PATCH_FALCON_MQA:-true}"
   if [[ "$patch_falcon_mqa" == "true" ]]; then
@@ -441,6 +470,21 @@ PY
     "$petals_venv/bin/python" -m pip install --upgrade --force-reinstall \
       "${hivemind_pip_args[@]}" \
       "$hivemind_spec"
+    # Reinstall hivemind runtime dependencies after --no-deps reinstall
+    "$petals_venv/bin/python" -m pip install --upgrade \
+      "configargparse>=1.2.3" \
+      "cryptography>=3.4.6" \
+      "msgpack>=0.5.6" \
+      "multiaddr>=0.0.9" \
+      "prefetch-generator>=1.0.1" \
+      "pymultihash>=0.8.2" \
+      "scipy>=1.2.1" \
+      "sortedcontainers" \
+      "psutil" \
+      "protobuf>=3.12.2,<7.0.0"
+    if [[ "$(uname -s)" == "Linux" ]]; then
+      "$petals_venv/bin/python" -m pip install --upgrade "uvloop>=0.14.0"
+    fi
     "$petals_venv/bin/python" -m pip install --upgrade --force-reinstall "$pydantic_spec"
   fi
   if ! "$petals_venv/bin/python" - <<'PY' >/dev/null 2>&1
