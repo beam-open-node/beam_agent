@@ -78,7 +78,7 @@ def main() -> int:
     print(f"Control plane URL: {control_plane_url}")
 
     asset_name = detect_asset_name()
-    default_base = "https://github.com/theopuga/beam_agent/releases/latest/download"
+    default_base = "https://github.com/beam-open-node/beam_agent/releases/latest/download"
     release_base = prompt("Release base URL", default=default_base).rstrip("/")
     download_url = f"{release_base}/{asset_name}"
     binary_path = Path(asset_name)

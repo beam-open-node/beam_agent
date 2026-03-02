@@ -15,14 +15,14 @@ The Beam Node Agent is the provider-side daemon that connects your GPU to the Be
 ### Linux / macOS
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/theopuga/beam_agent/main/install.sh -o install.sh
+curl -fsSL https://raw.githubusercontent.com/beam-open-node/beam_agent/main/install.sh -o install.sh
 bash install.sh
 ```
 
 ### Windows (PowerShell)
 
 ```powershell
-Invoke-WebRequest -Uri https://raw.githubusercontent.com/theopuga/beam_agent/main/install.ps1 -OutFile install.ps1
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/beam-open-node/beam_agent/main/install.ps1 -OutFile install.ps1
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
@@ -117,7 +117,7 @@ To enable onion transport, set `onion_address` in your config and add `"onion"` 
 ## Releases
 
 Pre-built binaries are available at:
-`https://github.com/theopuga/beam_agent/releases/latest`
+`https://github.com/beam-open-node/beam_agent/releases/latest`
 
 Expected assets:
 - `beam-node-agent-linux`

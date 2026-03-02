@@ -21,7 +21,7 @@ control_plane_url="${BEAM_CONTROL_PLANE_URL:-https://www.openbeam.me/}"
 control_plane_url="${control_plane_url%/}"
 echo "Control plane URL: $control_plane_url"
 
-release_base_default="https://github.com/theopuga/beam_agent/releases/latest/download"
+release_base_default="https://github.com/beam-open-node/beam_agent/releases/latest/download"
 if [[ "${BEAM_ACCEPT_DEFAULTS:-}" == "true" ]]; then
   release_base=""
 else
@@ -60,7 +60,7 @@ download_url="$release_base/$asset_name"
 # BEAM_PETALS_PYTHON subprocess, exactly as in the binary.
 # -----------------------------------------------------------------------
 if [[ "${BEAM_RUN_FROM_SOURCE:-false}" == "true" ]]; then
-  source_repo="${BEAM_SOURCE_REPO:-https://github.com/theopuga/beam_agent}"
+  source_repo="${BEAM_SOURCE_REPO:-https://github.com/beam-open-node/beam_agent}"
   source_dir="${BEAM_SOURCE_DIR:-./beam_agent_src}"
 
   if [[ -d "$source_dir/.git" ]]; then

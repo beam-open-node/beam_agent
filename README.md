@@ -6,12 +6,12 @@ Source code lives in the private core repo.
 ## Quick Start (Linux/macOS)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/theopuga/beam_agent/main/install.sh -o install.sh
+curl -fsSL https://raw.githubusercontent.com/beam-open-node/beam_agent/main/install.sh -o install.sh
 bash install.sh
 Quick Start (Windows PowerShell)
 powershell
 
-Invoke-WebRequest -Uri https://raw.githubusercontent.com/theopuga/beam_agent/main/install.ps1 -OutFile install.ps1
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/beam-open-node/beam_agent/main/install.ps1 -OutFile install.ps1
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 What This Does
 Downloads the correct node agent binary for your OS
@@ -20,7 +20,7 @@ Starts the agent and prints a 6‑digit pair code
 You enter that code in the Rent Panel to link your machine
 Releases
 Binaries are published under:
-https://github.com/theopuga/beam_agent/releases/latest
+https://github.com/beam-open-node/beam_agent/releases/latest
 
 Expected asset names:
 

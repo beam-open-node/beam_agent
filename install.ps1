@@ -15,7 +15,7 @@ if ([string]::IsNullOrWhiteSpace($controlPlaneUrl)) { $controlPlaneUrl = "https:
 $controlPlaneUrl = $controlPlaneUrl.TrimEnd("/")
 Write-Host "Control plane URL: $controlPlaneUrl"
 
-$releaseBaseDefault = "https://github.com/theopuga/beam_agent/releases/latest/download"
+$releaseBaseDefault = "https://github.com/beam-open-node/beam_agent/releases/latest/download"
 $releaseBase = Read-Host "Release base URL [$releaseBaseDefault]"
 if ([string]::IsNullOrWhiteSpace($releaseBase)) { $releaseBase = $releaseBaseDefault }
 $releaseBase = $releaseBase.TrimEnd("/")
