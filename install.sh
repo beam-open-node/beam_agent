@@ -273,9 +273,9 @@ PY
     "$petals_venv/bin/python" -m pip install --upgrade --force-reinstall --no-deps "typing_extensions>=4.12"
   fi
   "$petals_venv/bin/python" -m pip install --upgrade --no-deps grpcio "protobuf>=3.12.2,<7.0.0" grpcio-tools
-  torch_spec="${BEAM_PETALS_TORCH_SPEC:-torch==2.2.2}"
-  torchvision_spec="${BEAM_PETALS_TORCHVISION_SPEC:-torchvision==0.17.2}"
-  torchaudio_spec="${BEAM_PETALS_TORCHAUDIO_SPEC:-torchaudio==2.2.2}"
+  torch_spec="${BEAM_PETALS_TORCH_SPEC:-torch>=2.4,<2.6}"
+  torchvision_spec="${BEAM_PETALS_TORCHVISION_SPEC:-torchvision>=0.19,<0.21}"
+  torchaudio_spec="${BEAM_PETALS_TORCHAUDIO_SPEC:-torchaudio>=2.4,<2.6}"
   # Auto-detect CUDA version and set index URL if not provided
   if [[ -z "${BEAM_PETALS_TORCH_INDEX_URL:-}" ]] && command -v nvidia-smi >/dev/null 2>&1; then
     cuda_ver="$(nvidia-smi 2>/dev/null | grep -oP 'CUDA Version: \K[0-9]+\.[0-9]+' || true)"
@@ -331,7 +331,7 @@ PY
     fi
   fi
   "$petals_venv/bin/python" -m pip install --upgrade --force-reinstall "numpy<2" "setuptools<70"
-  hivemind_spec="${BEAM_PETALS_HIVEMIND_SPEC:-hivemind==1.1.10.post2}"
+  hivemind_spec="${BEAM_PETALS_HIVEMIND_SPEC:-hivemind @ git+https://github.com/learning-at-home/hivemind.git@213bff98a62accb91f254e2afdccbf1d69ebdea9}"
   hivemind_pip_args=()
   if [[ "${BEAM_PETALS_HIVEMIND_PIP_NO_BUILD_ISOLATION:-true}" == "true" ]]; then
     hivemind_pip_args+=(--no-build-isolation)
@@ -455,9 +455,9 @@ from hivemind.optim.grad_scaler import GradScaler  # noqa: F401
 PY
   then
     echo "Detected incompatible torch/hivemind combination. Reinstalling a compatible torch stack."
-    torch_compat_spec="${BEAM_PETALS_TORCH_COMPAT_SPEC:-torch==2.2.2}"
-    torchvision_compat_spec="${BEAM_PETALS_TORCHVISION_COMPAT_SPEC:-torchvision==0.17.2}"
-    torchaudio_compat_spec="${BEAM_PETALS_TORCHAUDIO_COMPAT_SPEC:-torchaudio==2.2.2}"
+    torch_compat_spec="${BEAM_PETALS_TORCH_COMPAT_SPEC:-torch>=2.4,<2.6}"
+    torchvision_compat_spec="${BEAM_PETALS_TORCHVISION_COMPAT_SPEC:-torchvision>=0.19,<0.21}"
+    torchaudio_compat_spec="${BEAM_PETALS_TORCHAUDIO_COMPAT_SPEC:-torchaudio>=2.4,<2.6}"
     if [[ -n "${BEAM_PETALS_TORCH_INDEX_URL:-}" ]]; then
       "$petals_venv/bin/python" -m pip install --upgrade --force-reinstall \
         "$torch_compat_spec" "$torchvision_compat_spec" "$torchaudio_compat_spec" \
