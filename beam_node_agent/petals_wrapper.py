@@ -1,11 +1,12 @@
 import logging
 import os
+import re
 import subprocess
 import sys
 import threading
 import time
 from collections import deque
-from typing import Optional
+from typing import List, Optional
 
 log = logging.getLogger(__name__)
 
@@ -29,6 +30,7 @@ class PetalsWrapper:
         self._last_start_time: Optional[int] = None
         self._last_exit_code: Optional[int] = None
         self._last_exit_time: Optional[int] = None
+        self._local_p2p_addrs: List[str] = []
 
     def _stream_logs(self, stream, label: str):
         try:
@@ -38,6 +40,19 @@ class PetalsWrapper:
                 message = line.rstrip()
                 self._log_buffer.append(f"[{label}] {message}")
                 log.info("Petals %s: %s", label, message)
+                # Extract local P2P multiaddrs from "Running a server on [...]"
+                if "Running a server on" in message and not self._local_p2p_addrs:
+                    match = re.search(r"\[(.+)\]", message)
+                    if match:
+                        raw = match.group(1)
+                        addrs = [
+                            a.strip().strip("'\"")
+                            for a in raw.split(",")
+                            if "/p2p/" in a
+                        ]
+                        if addrs:
+                            self._local_p2p_addrs = addrs
+                            log.info("Extracted local P2P addrs: %s", addrs)
         except Exception as exc:
             log.warning("Petals %s log stream error: %s", label, exc)
 
@@ -133,9 +148,14 @@ class PetalsWrapper:
                 log.warning("Petals process unresponsive, killing...")
                 self.process.kill()
         self.process = None
+        self._local_p2p_addrs = []
 
     def is_running(self) -> bool:
         return self.process is not None and self.process.poll() is None
+
+    def local_p2p_addrs(self) -> List[str]:
+        """Return the local Petals server's P2P multiaddrs (extracted from logs)."""
+        return list(self._local_p2p_addrs)
 
     def get_logs(self) -> str:
         # TODO: Implement log tailing from the PIPE or log file

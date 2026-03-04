@@ -915,10 +915,21 @@ class NodeAgent:
                 extra_env["BEAM_INFERENCE_INITIAL_PEERS"] = json.dumps(assignment_peers)
                 log.info("Inference worker will use %d beam DHT peer(s)", len(assignment_peers))
             else:
-                log.info(
-                    "No beam DHT peers in assignment — inference worker will use "
-                    "PUBLIC_INITIAL_PEERS (public Petals swarm)"
-                )
+                # No beam DHT peers from the control plane — fall back to the
+                # local Petals server's P2P address so the inference worker
+                # connects to its own co-located server instead of the public swarm.
+                local_addrs = self.petals.local_p2p_addrs()
+                if local_addrs:
+                    extra_env["BEAM_INFERENCE_INITIAL_PEERS"] = json.dumps(local_addrs)
+                    log.info(
+                        "No beam DHT peers in assignment — inference worker will use "
+                        "local Petals server P2P addr: %s", local_addrs
+                    )
+                else:
+                    log.info(
+                        "No beam DHT peers in assignment — inference worker will use "
+                        "PUBLIC_INITIAL_PEERS (public Petals swarm)"
+                    )
 
             # Pre-warm: instruct the worker to load the model immediately at startup
             # so the first real inference request doesn't have to wait for disk I/O.
@@ -1183,6 +1194,28 @@ class NodeAgent:
         except Exception as e:
             log.error(f"Heartbeat connection error: {e}")
 
+    def _detect_model_layers(self, model_id: str) -> Optional[int]:
+        """Try to detect the number of hidden layers in a model via transformers."""
+        try:
+            import subprocess
+            petals_python = os.environ.get("BEAM_PETALS_PYTHON") or sys.executable
+            result = subprocess.run(
+                [
+                    petals_python, "-c",
+                    f"from transformers import AutoConfig; "
+                    f"c = AutoConfig.from_pretrained('{model_id}'); "
+                    f"print(c.num_hidden_layers)",
+                ],
+                capture_output=True, text=True, timeout=60,
+            )
+            if result.returncode == 0:
+                layers = int(result.stdout.strip())
+                log.info("Detected %d layers for model %s", layers, model_id)
+                return layers
+        except Exception as e:
+            log.warning("Failed to detect model layers for %s: %s", model_id, e)
+        return None
+
     async def _refresh_assignment(self):
         if not self.identity.node_id:
             return
@@ -1214,6 +1247,17 @@ class NodeAgent:
         if new_range[0] < 0 or new_range[1] <= new_range[0]:
             return
 
+        # Auto-detect the actual model layer count and override the
+        # control-plane range when it under-counts (e.g. 32 vs 36).
+        actual_layers = self._detect_model_layers(new_mid)
+        if actual_layers and int(new_range[1]) < actual_layers:
+            log.warning(
+                "Control plane assigned blocks [%s, %s] but model %s "
+                "has %d layers — overriding to [0, %d]",
+                new_range[0], new_range[1], new_mid, actual_layers, actual_layers,
+            )
+            new_range = [0, actual_layers]
+
         current_mid = (
             self.current_assignment.get("model_id") if self.current_assignment else None
         )
@@ -1231,7 +1275,6 @@ class NodeAgent:
         changed = (
             new_mid != current_mid
             or new_range != current_range
-            or new_epoch != current_epoch
         )
         if changed:
             # initial_peers: list of multiaddrs from the backend (beam DHT bootstrap).
@@ -1242,6 +1285,7 @@ class NodeAgent:
                 new_peers = None  # empty list → treat as "not provided"
 
             log.info(f"New assignment received: {new_mid} blocks {new_range}")
+
             self.current_assignment = {
                 "model_id": new_mid,
                 "block_range": [int(new_range[0]), int(new_range[1])],
