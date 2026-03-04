@@ -18,6 +18,22 @@ from textual.widgets import (
 )
 
 _DEFAULT_CONTROL_PLANE = "https://www.openbeam.me"
+
+_BANNER = """\
+██╗    ██╗███████╗██╗      ██████╗ ██████╗ ███╗   ███╗███████╗
+██║    ██║██╔════╝██║     ██╔════╝██╔═══██╗████╗ ████║██╔════╝
+██║ █╗ ██║█████╗  ██║     ██║     ██║   ██║██╔████╔██║█████╗
+██║███╗██║██╔══╝  ██║     ██║     ██║   ██║██║╚██╔╝██║██╔══╝
+╚███╔███╔╝███████╗███████╗╚██████╗╚██████╔╝██║ ╚═╝ ██║███████╗
+ ╚══╝╚══╝ ╚══════╝╚══════╝ ╚═════╝ ╚═════╝ ╚═╝     ╚═╝╚══════╝
+
+████████╗ ██████╗     ██████╗ ███████╗ █████╗ ███╗   ███╗
+╚══██╔══╝██╔═══██╗    ██╔══██╗██╔════╝██╔══██╗████╗ ████║
+   ██║   ██║   ██║    ██████╔╝█████╗  ███████║██╔████╔██║
+   ██║   ██║   ██║    ██╔══██╗██╔══╝  ██╔══██║██║╚██╔╝██║
+   ██║   ╚██████╔╝    ██████╔╝███████╗██║  ██║██║ ╚═╝ ██║
+   ╚═╝    ╚═════╝     ╚═════╝ ╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝\
+"""
 _DEFAULT_CONFIG_PATH = "config.yaml"
 
 _STEPS = ["Control Plane", "Config File", "Confirm & Start"]
@@ -33,6 +49,13 @@ class SetupScreen(Screen):
     CSS = """
     SetupScreen {
         align: center middle;
+        layout: vertical;
+    }
+
+    #banner {
+        text-align: center;
+        color: $primary;
+        margin: 1 0;
     }
 
     #wizard-box {
@@ -95,6 +118,7 @@ class SetupScreen(Screen):
     # ------------------------------------------------------------------
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
+        yield Static(_BANNER, id="banner")
         with Center():
             with Middle():
                 with Vertical(id="wizard-box"):

@@ -20,6 +20,22 @@ from beam_node_agent.tui.log_parser import EventKind, parse
 
 _MAX_LOG_LINES = 500
 
+_BANNER = """\
+██╗    ██╗███████╗██╗      ██████╗ ██████╗ ███╗   ███╗███████╗
+██║    ██║██╔════╝██║     ██╔════╝██╔═══██╗████╗ ████║██╔════╝
+██║ █╗ ██║█████╗  ██║     ██║     ██║   ██║██╔████╔██║█████╗
+██║███╗██║██╔══╝  ██║     ██║     ██║   ██║██║╚██╔╝██║██╔══╝
+╚███╔███╔╝███████╗███████╗╚██████╗╚██████╔╝██║ ╚═╝ ██║███████╗
+ ╚══╝╚══╝ ╚══════╝╚══════╝ ╚═════╝ ╚═════╝ ╚═╝     ╚═╝╚══════╝
+
+████████╗ ██████╗     ██████╗ ███████╗ █████╗ ███╗   ███╗
+╚══██╔══╝██╔═══██╗    ██╔══██╗██╔════╝██╔══██╗████╗ ████║
+   ██║   ██║   ██║    ██████╔╝█████╗  ███████║██╔████╔██║
+   ██║   ██║   ██║    ██╔══██╗██╔══╝  ██╔══██║██║╚██╔╝██║
+   ██║   ╚██████╔╝    ██████╔╝███████╗██║  ██║██║ ╚═╝ ██║
+   ╚═╝    ╚═════╝     ╚═════╝ ╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝\
+"""
+
 
 # ---------------------------------------------------------------------------
 # Messages posted from the subprocess reader task to the screen
@@ -71,6 +87,12 @@ class DashboardScreen(Screen):
         layout: vertical;
     }
 
+    #banner {
+        text-align: center;
+        color: $primary;
+        margin: 1 0 0 0;
+    }
+
     #top-row {
         height: auto;
         layout: horizontal;
@@ -108,7 +130,6 @@ class DashboardScreen(Screen):
         text-align: center;
         text-style: bold;
         color: $warning;
-        font-size: 2;
     }
 
     #pairing-hint {
@@ -170,6 +191,7 @@ class DashboardScreen(Screen):
     # ------------------------------------------------------------------
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
+        yield Static(_BANNER, id="banner")
         with Horizontal(id="top-row"):
             with Vertical(id="status-panel"):
                 yield Label("[b]Status[/b]")
