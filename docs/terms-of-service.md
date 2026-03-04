@@ -175,5 +175,5 @@ These Terms shall be governed by and construed in accordance with applicable law
 
 For questions about these Terms, contact us at:
 
-- **Email**: beamopennode@gmail.com
+- **Email**: legal@openbeam.me
 - **Twitter / X**: [@Beam_open_node](https://x.com/Beam_open_node)
