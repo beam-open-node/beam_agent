@@ -90,7 +90,8 @@ class DashboardScreen(Screen):
     #banner {
         text-align: center;
         color: $primary;
-        margin: 1 0 0 0;
+        margin: 0;
+        height: 7;
     }
 
     #top-row {
