@@ -1247,16 +1247,17 @@ class NodeAgent:
         if new_range[0] < 0 or new_range[1] <= new_range[0]:
             return
 
-        # Auto-detect the actual model layer count and override the
-        # control-plane range when it under-counts (e.g. 32 vs 36).
+        # Auto-detect the actual model layer count and cap/extend the
+        # control-plane range when it doesn't match (e.g. 36 assigned for
+        # a 32-layer model, or 32 assigned for a 36-layer model).
         actual_layers = self._detect_model_layers(new_mid)
-        if actual_layers and int(new_range[1]) < actual_layers:
+        if actual_layers and int(new_range[1]) != actual_layers:
             log.warning(
                 "Control plane assigned blocks [%s, %s] but model %s "
-                "has %d layers — overriding to [0, %d]",
+                "has %d layers — adjusting end to %d",
                 new_range[0], new_range[1], new_mid, actual_layers, actual_layers,
             )
-            new_range = [0, actual_layers]
+            new_range = [new_range[0], actual_layers]
 
         current_mid = (
             self.current_assignment.get("model_id") if self.current_assignment else None

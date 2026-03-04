@@ -185,7 +185,6 @@ if _BaseModel is not None:
             hs = inputs_embeds; out_shape = input_shape + (hs.size(-1),)
             if past_key_values is None:
                 past_key_values = RemotePastKeyValues()
-            past_key_values.update_seen(hs.size(1))
             hs = self.layers(hs, prompts=ip, hypo_ids=past_key_values.hypo_ids if past_key_values else None)
             if use_prompts:
                 hs = hs[:, self.pre_seq_len:]
@@ -240,6 +239,37 @@ register_model_classes(
 # Model definitions
 # ---------------------------------------------------------------------------
 MODELS = [
+    {
+        "pkg": "qwen3",
+        "model_name": "Qwen3",
+        "block_class": "WrappedQwen3Block",
+        "config_class": "DistributedQwen3Config",
+        "dist_model": "DistributedQwen3Model",
+        "dist_causal_lm": "DistributedQwen3ForCausalLM",
+        "output_class": "BaseModelOutputWithPast",
+        "decoder_import": textwrap.dedent("""\
+            try:
+                from transformers.models.qwen3.modeling_qwen3 import Qwen3DecoderLayer as _DecoderLayer
+            except ImportError:
+                _DecoderLayer = None"""),
+        "base_config_import": textwrap.dedent("""\
+            try:
+                from transformers.models.qwen3 import Qwen3Config as _BaseConfig
+            except ImportError:
+                _BaseConfig = None
+            if _BaseConfig is None:
+                raise ImportError("Qwen3 requires transformers >= 5.0.0")"""),
+        "attn_import": textwrap.dedent("""\
+            try:
+                from transformers.models.qwen3.modeling_qwen3 import Qwen3Attention as _AttnClass
+            except ImportError:
+                _AttnClass = None"""),
+        "base_model_import": textwrap.dedent("""\
+            try:
+                from transformers.models.qwen3 import Qwen3Model as _BaseModel, Qwen3ForCausalLM as _BaseCausalLM, Qwen3PreTrainedModel as _BasePreTrained
+            except ImportError:
+                _BaseModel = _BaseCausalLM = _BasePreTrained = None"""),
+    },
     {
         "pkg": "qwen3_5_moe",
         "model_name": "Qwen3.5 MoE",
@@ -327,11 +357,14 @@ def patch_auto_config(utils_dir: pathlib.Path):
 
     text = auto_config_path.read_text()
 
-    # Add _MODEL_TYPE_ALIASES if not present
-    if "_MODEL_TYPE_ALIASES" not in text:
+    # Add _MODEL_TYPE_ALIASES dict definition if not present
+    ALIASES_DEF = '_MODEL_TYPE_ALIASES = {"kimi_k25": "kimi_k2"}'
+    if ALIASES_DEF not in text:
+        # Insert before _CLASS_MAPPING = {} (the actual petals code uses {}, not ()
         text = text.replace(
-            "_CLASS_MAPPING = (",
-            '_MODEL_TYPE_ALIASES = {"kimi_k25": "kimi_k2"}\n\n_CLASS_MAPPING = (',
+            "_CLASS_MAPPING = {}",
+            f'{ALIASES_DEF}\n\n_CLASS_MAPPING = {{}}',
+            1,
         )
 
     # Add trust_remote_code=True to AutoConfig.from_pretrained call
