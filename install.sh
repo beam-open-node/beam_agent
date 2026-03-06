@@ -321,7 +321,7 @@ PY
     "$numpy_spec" \
     "${petals_pip_args[@]}" \
     petals
-  "$petals_venv/bin/python" -m pip install --upgrade --no-deps "$transformers_spec"
+  "$petals_venv/bin/python" -m pip install --upgrade "$transformers_spec"
   if [[ "${BEAM_PETALS_SKIP_TORCH_INSTALL:-}" != "true" ]]; then
     if [[ -n "${BEAM_PETALS_TORCH_INDEX_URL:-}" ]]; then
       "$petals_venv/bin/python" -m pip install --upgrade --force-reinstall \
