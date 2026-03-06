@@ -306,7 +306,7 @@ PY
     accelerate_specs="${BEAM_PETALS_ACCELERATE_SPEC}"
   fi
   if [[ -z "$accelerate_specs" ]]; then
-    accelerate_specs="0.31.0 0.30.1 0.29.3 0.28.0 0.27.2 0.26.1 0.25.0 0.24.1 0.23.0 0.22.0"
+    accelerate_specs="1.3.0 1.2.0 1.1.0 1.0.0 0.34.2 0.34.1 0.31.0 0.30.1 0.29.3 0.28.0 0.27.2 0.26.1 0.25.0 0.24.1 0.23.0 0.22.0"
   fi
   
   petals_pip_args=()
