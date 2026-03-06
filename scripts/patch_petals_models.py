@@ -65,9 +65,14 @@ if _DecoderLayer is not None:
                 pass
 
         def forward(self, hidden_states, *args, attention_mask=None, layer_past=None, use_cache=False, **kwargs):
+            import inspect as _insp
             bs, sl, _ = hidden_states.shape
             pkvl = 0
             sl_wp = sl
+
+            # Detect tx4/tx5: past_key_value (singular) vs past_key_values (plural)
+            _parent_fwd = type(self).__mro__[1].forward
+            _past_kw = "past_key_values" if "past_key_values" in _insp.signature(_parent_fwd).parameters else "past_key_value"
 
             # Always create a fresh DynamicCache; populate with past KV when available
             pkv = DynamicCache()
@@ -82,22 +87,28 @@ if _DecoderLayer is not None:
             if "position_embeddings" not in kwargs and self._beam_rope is not None:
                 kwargs["position_embeddings"] = self._beam_rope(hidden_states, pos_ids)
 
-            # transformers>=5.x: past_key_values (plural), DynamicCache updated in-place,
-            # returns tuple (hidden_states, [opt: attn_weights]) — no past_key_values in output
             outputs = super().forward(
                 hidden_states,
                 attention_mask=attention_mask,
                 position_ids=pos_ids,
-                past_key_values=pkv,
                 use_cache=use_cache,
+                **{{_past_kw: pkv}},
                 **kwargs
             )
             h = outputs[0]  # hidden_states is always first element
 
             if use_cache:
-                # DynamicCache updated in-place; extract via key_cache/value_cache lists
-                k_out = pkv.key_cache[self.layer_idx]    # (bs, nkv, sl_wp, hd)
-                v_out = pkv.value_cache[self.layer_idx]  # (bs, nkv, sl_wp, hd)
+                # tx5: DynamicCache updated in-place; tx4: cache may be in outputs
+                if len(pkv.key_cache) > self.layer_idx and pkv.key_cache[self.layer_idx].numel() > 0:
+                    k_out = pkv.key_cache[self.layer_idx]
+                    v_out = pkv.value_cache[self.layer_idx]
+                else:
+                    cache_out = outputs[-1]
+                    if isinstance(cache_out, DynamicCache):
+                        k_out = cache_out.key_cache[self.layer_idx]
+                        v_out = cache_out.value_cache[self.layer_idx]
+                    else:
+                        k_out, v_out = cache_out
                 beam_kv = self._rctb((k_out, v_out), bs, sl_wp)
                 return (h, beam_kv)
             return (h,)
@@ -273,6 +284,64 @@ register_model_classes(
 # ---------------------------------------------------------------------------
 # Model definitions
 # ---------------------------------------------------------------------------
+KIMI_K2_BLOCK = textwrap.dedent("""\
+import inspect as _inspect
+import torch, torch.nn as nn
+from transformers.cache_utils import DynamicCache
+
+def _get_kimi_cls():
+    try:
+        from transformers.models.kimi_k2.modeling_kimi_k2 import KimiK2DecoderLayer
+        return KimiK2DecoderLayer
+    except ImportError:
+        return None
+
+class WrappedKimiK2Block(nn.Module):
+    def __init__(self, config, layer_idx=0):
+        super().__init__()
+        self.layer_idx = layer_idx
+        cls = _get_kimi_cls()
+        if cls is None:
+            raise ImportError("Kimi K2 requires trust_remote_code and compatible transformers")
+        self.decoder_layer = cls(config, layer_idx)
+        sig = _inspect.signature(self.decoder_layer.forward)
+        self._past_kw = "past_key_values" if "past_key_values" in sig.parameters else "past_key_value"
+
+    def forward(self, hidden_states, *args, attention_mask=None, layer_past=None, use_cache=False, **kwargs):
+        bs, sl, _ = hidden_states.shape
+        pkvl = 0; sl_wp = sl
+        pkv = DynamicCache()
+        if layer_past is not None:
+            pkvl = layer_past[0].shape[2]; sl_wp = sl + pkvl
+            k, v = layer_past
+            nkv = k.shape[0] // bs; hd = k.shape[1]
+            km = k.permute(0,2,1).view(bs,nkv,pkvl,hd)
+            vm = v.view(bs,nkv,pkvl,hd)
+            pkv.update(km, vm, layer_idx=self.layer_idx)
+        pos_ids = torch.arange(pkvl, sl+pkvl, dtype=torch.long, device=hidden_states.device).unsqueeze(0)
+        outputs = self.decoder_layer(
+            hidden_states, *args,
+            attention_mask=attention_mask, position_ids=pos_ids,
+            use_cache=use_cache, **{self._past_kw: pkv}, **kwargs
+        )
+        if use_cache:
+            if len(pkv.key_cache) > self.layer_idx and pkv.key_cache[self.layer_idx].numel() > 0:
+                k_out = pkv.key_cache[self.layer_idx]; v_out = pkv.value_cache[self.layer_idx]
+            else:
+                co = outputs[-1]
+                if isinstance(co, DynamicCache):
+                    k_out = co.key_cache[self.layer_idx]; v_out = co.value_cache[self.layer_idx]
+                else:
+                    k_out, v_out = co
+            attn = self.decoder_layer.self_attn
+            nkv = getattr(attn,"num_key_value_heads",getattr(attn,"num_heads",1))
+            hd = getattr(attn,"head_dim",k_out.shape[3])
+            v_out = v_out.view(bs*nkv,sl_wp,hd)
+            k_out = k_out.view(bs*nkv,sl_wp,hd).permute(0,2,1)
+            return (outputs[0], (k_out, v_out))
+        return (outputs[0],)
+""")
+
 MODELS = [
     {
         "pkg": "qwen3",
@@ -370,6 +439,143 @@ MODELS = [
     },
 ]
 
+KIMI_K2_INIT = textwrap.dedent("""\
+from petals.models.kimi_k2.block import WrappedKimiK2Block
+from petals.models.kimi_k2.config import DistributedKimiK2Config
+from petals.models.kimi_k2.model import DistributedKimiK2ForCausalLM, DistributedKimiK2Model
+from petals.utils.auto_config import register_model_classes
+register_model_classes(
+    config=DistributedKimiK2Config,
+    model=DistributedKimiK2Model,
+    model_for_causal_lm=DistributedKimiK2ForCausalLM,
+)
+""")
+
+KIMI_K2_CONFIG = textwrap.dedent("""\
+import os
+from hivemind import get_logger
+from transformers import AutoConfig, PretrainedConfig
+from petals.client.config import ClientConfig
+from petals.client.lm_head import LMHeadConfig
+from petals.client.ptune import PTuneConfig
+from petals.models.kimi_k2.block import WrappedKimiK2Block
+logger = get_logger(__name__)
+
+class DistributedKimiK2Config(PretrainedConfig, ClientConfig, PTuneConfig, LMHeadConfig):
+    model_type = "kimi_k2"
+    block_class = WrappedKimiK2Block
+    attn_class = None
+    block_prefix = "model.layers"
+
+    @property
+    def num_key_value_groups(self):
+        nkv = getattr(self, "num_key_value_heads", self.num_attention_heads)
+        return self.num_attention_heads // nkv
+
+    @classmethod
+    def from_pretrained(cls, model_name_or_path, *args, dht_prefix=None, **kwargs):
+        kwargs.setdefault("trust_remote_code", True)
+        if model_name_or_path and not os.path.isdir(str(model_name_or_path)) and not dht_prefix:
+            dht_prefix = str(model_name_or_path).split("/")[-1].replace(".", "-")
+            if not dht_prefix.endswith("-hf"):
+                dht_prefix += "-hf"
+            logger.info(f"Using DHT prefix: {dht_prefix}")
+        raw = AutoConfig.from_pretrained(model_name_or_path, *args, **kwargs)
+        text_cfg = getattr(raw, "text_config", raw)
+        cfg_dict = {k: v for k, v in text_cfg.to_dict().items()}
+        cfg_dict["dht_prefix"] = dht_prefix
+        result = cls(**cfg_dict)
+        result.use_cache = True
+        if result.pad_token_id is None:
+            result.pad_token_id = 0
+        return result
+""")
+
+KIMI_K2_MODEL = textwrap.dedent("""\
+from typing import Optional
+import torch, torch.nn as nn
+from hivemind import DHT
+from hivemind.utils.logging import get_logger
+from transformers.modeling_outputs import BaseModelOutputWithPast
+from petals.client.from_pretrained import FromPretrainedMixin
+from petals.client.lm_head import LMHead
+from petals.client.ptune import PTuneMixin
+from petals.client.remote_generation import RemoteGenerationMixin, RemotePastKeyValues
+from petals.client.remote_sequential import RemoteSequential
+from petals.models.kimi_k2.config import DistributedKimiK2Config
+from petals.utils.auto_config import DefaultRevisionMixin
+logger = get_logger(__name__)
+
+class DistributedKimiK2Model(DefaultRevisionMixin, FromPretrainedMixin, PTuneMixin, nn.Module):
+    _keys_to_ignore_on_load_missing = PTuneMixin._keys_to_ignore_on_load_missing
+    _keys_to_ignore_on_load_unexpected = [r"^model\\\\.layers\\\\."]
+    config_class = DistributedKimiK2Config
+
+    def __init__(self, config, *, dht=None):
+        super().__init__()
+        self.config = config
+        self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, getattr(config, "pad_token_id", 0))
+        self.layers = RemoteSequential(config, dht=dht)
+        self.norm = nn.LayerNorm(config.hidden_size, eps=getattr(config, "rms_norm_eps", 1e-6))
+        self.requires_grad_(False)
+        self.init_prompts(config)
+
+    def forward(self, input_ids=None, past_key_values=None, attention_mask=None,
+                position_ids=None, inputs_embeds=None, use_cache=None,
+                output_attentions=None, output_hidden_states=None, return_dict=None, **kwargs):
+        if input_ids is not None and inputs_embeds is not None:
+            raise ValueError("Cannot specify both input_ids and inputs_embeds")
+        elif input_ids is not None:
+            input_shape = input_ids.size(); input_ids = input_ids.view(-1, input_shape[-1])
+        elif inputs_embeds is not None:
+            input_shape = inputs_embeds.size()[:-1]
+        else:
+            raise ValueError("Must specify input_ids or inputs_embeds")
+        assert use_cache is None or use_cache
+        if inputs_embeds is None:
+            inputs_embeds = self.embed_tokens(input_ids)
+        use_prompts = self.config.tuning_mode and "ptune" in self.config.tuning_mode and self.h.position == 0
+        if use_prompts:
+            prompts, ip = self.get_prompt(inputs_embeds.shape[0])
+            inputs_embeds = torch.cat([prompts, inputs_embeds], dim=1)
+        else:
+            ip = None
+        hs = inputs_embeds; out_shape = input_shape + (hs.size(-1),)
+        if past_key_values is None:
+            past_key_values = RemotePastKeyValues()
+        past_key_values.update_seen(hs.size(1))
+        hs = self.layers(hs, prompts=ip, hypo_ids=past_key_values.hypo_ids if past_key_values else None)
+        if use_prompts:
+            hs = hs[:, self.pre_seq_len:]
+        hs = self.norm(hs).view(out_shape)
+        return BaseModelOutputWithPast(last_hidden_state=hs, past_key_values=past_key_values,
+                                       hidden_states=None, attentions=None)
+
+    @property
+    def word_embeddings(self): return self.embed_tokens
+    @property
+    def word_embeddings_layernorm(self): return nn.Identity()
+    @property
+    def h(self): return self.layers
+    @property
+    def ln_f(self): return self.norm
+
+class DistributedKimiK2ForCausalLM(FromPretrainedMixin, RemoteGenerationMixin, nn.Module):
+    _keys_to_ignore_on_load_missing = DistributedKimiK2Model._keys_to_ignore_on_load_missing
+    _keys_to_ignore_on_load_unexpected = DistributedKimiK2Model._keys_to_ignore_on_load_unexpected
+    config_class = DistributedKimiK2Config
+
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+        self.model = DistributedKimiK2Model(config)
+        self.lm_head = LMHead(config)
+
+    def get_output_embeddings(self): return self.lm_head
+    @property
+    def transformer(self): return self.model
+""")
+
 
 def patch_model(models_dir: pathlib.Path, spec: dict):
     pkg = spec["pkg"]
@@ -381,6 +587,17 @@ def patch_model(models_dir: pathlib.Path, spec: dict):
     (pkg_dir / "config.py").write_text(CONFIG_TEMPLATE.format(**spec))
     (pkg_dir / "model.py").write_text(MODEL_TEMPLATE.format(**spec))
     print(f"  {spec['model_name']} ({pkg}) overlay written")
+
+
+def patch_kimi_k2(models_dir: pathlib.Path):
+    """Write the Kimi K2 overlay (trust_remote_code — cannot use standard template)."""
+    pkg_dir = models_dir / "kimi_k2"
+    pkg_dir.mkdir(exist_ok=True)
+    (pkg_dir / "__init__.py").write_text(KIMI_K2_INIT)
+    (pkg_dir / "block.py").write_text(KIMI_K2_BLOCK)
+    (pkg_dir / "config.py").write_text(KIMI_K2_CONFIG)
+    (pkg_dir / "model.py").write_text(KIMI_K2_MODEL)
+    print("  Kimi K2/K2.5 (kimi_k2) overlay written")
 
 
 def patch_auto_config(utils_dir: pathlib.Path):
@@ -505,11 +722,11 @@ def main():
     for spec in MODELS:
         patch_model(models_dir, spec)
 
-    # Kimi K2 is special — not in standard transformers, needs trust_remote_code.
-    # We skip the overlay for now as it requires the model repo's custom code.
-    # The auto_config alias (kimi_k25 -> kimi_k2) is already patched above.
+    # Kimi K2 uses trust_remote_code — handled separately with a composition wrapper.
+    patch_kimi_k2(models_dir)
 
-    patch_models_init(models_dir, [m["pkg"] for m in MODELS])
+    all_pkgs = [m["pkg"] for m in MODELS] + ["kimi_k2"]
+    patch_models_init(models_dir, all_pkgs)
     print("Done.")
 
 

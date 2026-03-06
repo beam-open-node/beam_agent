@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(for d in qwen3_5_moe glm_moe_dsa kimi_k2 mistral)",
+      "Bash(do echo \"=== $d ===\")",
+      "Read(//c/Code/beam_vscode/beam/engine/petals/models/$d/**)",
+      "Bash(done)",
+      "Bash(for d in qwen3_5_moe glm_moe_dsa kimi_k2)",
+      "Bash(do echo \"=== $d/config.py ===\")",
+      "Bash(do echo \"=== $d/model.py ===\")"
+    ]
+  }
+}
