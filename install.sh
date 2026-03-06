@@ -862,6 +862,230 @@ qwen_dir.mkdir(exist_ok=True)
             def __init__(self, *a, **kw): raise ImportError("Qwen3.5 MoE requires transformers >= 5.2.0")
 """))
 
+# ---------- Qwen3 dense overlay ----------
+qwen3_dir = models_dir / "qwen3"
+qwen3_dir.mkdir(exist_ok=True)
+
+(qwen3_dir / "__init__.py").write_text(textwrap.dedent("""\
+    from petals.models.qwen3.block import WrappedQwen3Block
+    from petals.models.qwen3.config import DistributedQwen3Config
+    from petals.models.qwen3.model import DistributedQwen3ForCausalLM, DistributedQwen3Model
+    from petals.utils.auto_config import register_model_classes
+    register_model_classes(
+        config=DistributedQwen3Config,
+        model=DistributedQwen3Model,
+        model_for_causal_lm=DistributedQwen3ForCausalLM,
+    )
+"""))
+
+(qwen3_dir / "block.py").write_text(textwrap.dedent("""\
+    import torch
+    from transformers.cache_utils import DynamicCache
+    try:
+        from transformers.modeling_attn_mask_utils import (
+            _prepare_4d_causal_attention_mask,
+            _prepare_4d_causal_attention_mask_for_sdpa,
+        )
+    except ImportError:
+        _prepare_4d_causal_attention_mask = None
+        _prepare_4d_causal_attention_mask_for_sdpa = None
+    try:
+        from transformers.models.qwen3.modeling_qwen3 import Qwen3DecoderLayer as _DecoderLayer
+    except ImportError:
+        _DecoderLayer = None
+
+    if _DecoderLayer is not None:
+        class WrappedQwen3Block(_DecoderLayer):
+            def __init__(self, config, layer_idx):
+                super().__init__(config, layer_idx)
+                self._attn_implementation = getattr(config, "_attn_implementation", "eager")
+                self.layer_idx = layer_idx
+            def forward(self, hidden_states, *args, attention_mask=None, layer_past=None, use_cache=False, **kwargs):
+                batch_size, seq_length, _ = hidden_states.shape
+                past_key_values_length = 0
+                past_key_value = layer_past
+                if past_key_value is not None:
+                    past_key_values_length = past_key_value[0].shape[2]
+                    _pkv = self._reorder_cache_from_bloom(past_key_value, batch_size, past_key_values_length)
+                    past_key_value = DynamicCache()
+                    past_key_value.key_cache = [torch.empty(0) for _ in range(self.layer_idx)] + [_pkv[0]]
+                    past_key_value.value_cache = [torch.empty(0) for _ in range(self.layer_idx)] + [_pkv[1]]
+                    past_key_value._seen_tokens = past_key_values_length
+                seq_length_with_past = seq_length + past_key_values_length
+                if self._attn_implementation == "flash_attention_2":
+                    attention_mask = attention_mask if (attention_mask is not None and 0 in attention_mask) else None
+                elif self._attn_implementation == "sdpa" and _prepare_4d_causal_attention_mask_for_sdpa:
+                    attention_mask = _prepare_4d_causal_attention_mask_for_sdpa(attention_mask, (batch_size, seq_length), hidden_states, past_key_values_length)
+                elif _prepare_4d_causal_attention_mask:
+                    attention_mask = _prepare_4d_causal_attention_mask(attention_mask, (batch_size, seq_length), hidden_states, past_key_values_length)
+                position_ids = torch.arange(past_key_values_length, seq_length_with_past, dtype=torch.long, device=hidden_states.device).unsqueeze(0).view(-1, seq_length)
+                outputs = super().forward(hidden_states, *args, attention_mask=attention_mask, position_ids=position_ids, past_key_value=past_key_value, use_cache=use_cache, **kwargs)
+                if use_cache:
+                    present_key_value = outputs[-1]
+                    present_key_value = present_key_value[self.layer_idx]
+                    present_key_value = self._reorder_cache_to_bloom(present_key_value, batch_size, seq_length_with_past)
+                    outputs = outputs[:-1] + (present_key_value,)
+                return outputs
+            def _reorder_cache_from_bloom(self, key_value, batch_size, seq_length):
+                key_states, value_states = key_value
+                num_kv = getattr(self.self_attn, "num_key_value_heads", getattr(self.self_attn, "num_heads", 1))
+                hd = getattr(self.self_attn, "head_dim", key_states.shape[-1])
+                key_states = key_states.permute(0, 2, 1).view(batch_size, num_kv, seq_length, hd)
+                value_states = value_states.view(*key_states.shape)
+                return (key_states, value_states)
+            def _reorder_cache_to_bloom(self, key_value, batch_size, seq_length):
+                key_states, value_states = key_value
+                num_kv = getattr(self.self_attn, "num_key_value_heads", getattr(self.self_attn, "num_heads", 1))
+                hd = getattr(self.self_attn, "head_dim", key_states.shape[-1])
+                value_states = value_states.view(batch_size * num_kv, seq_length, hd)
+                key_states = key_states.view(*value_states.shape).permute(0, 2, 1)
+                return (key_states, value_states)
+    else:
+        class WrappedQwen3Block:
+            def __init__(self, *a, **kw): raise ImportError("Qwen3 dense requires transformers >= 4.51.0")
+"""))
+
+(qwen3_dir / "config.py").write_text(textwrap.dedent("""\
+    import os
+    from hivemind import get_logger
+    from petals.client.config import ClientConfig
+    from petals.client.lm_head import LMHeadConfig
+    from petals.client.ptune import PTuneConfig
+    from petals.models.qwen3.block import WrappedQwen3Block
+    logger = get_logger(__name__)
+    try:
+        from transformers import Qwen3Config as _BaseConfig
+        from transformers.models.qwen3.modeling_qwen3 import Qwen3Attention as _AttnClass
+    except ImportError:
+        _BaseConfig = None
+        _AttnClass = None
+
+    if _BaseConfig is not None:
+        class DistributedQwen3Config(_BaseConfig, ClientConfig, PTuneConfig, LMHeadConfig):
+            block_class = WrappedQwen3Block
+            attn_class = _AttnClass
+            block_prefix = "model.layers"
+            @property
+            def num_key_value_groups(self):
+                return self.num_attention_heads // self.num_key_value_heads
+            @classmethod
+            def from_pretrained(cls, model_name_or_path, *args, dht_prefix=None, **kwargs):
+                loading_from_repo = model_name_or_path is not None and not os.path.isdir(str(model_name_or_path))
+                if loading_from_repo and dht_prefix is None:
+                    dht_prefix = str(model_name_or_path).split("/")[-1].replace(".", "-")
+                    if not dht_prefix.endswith("-hf"):
+                        dht_prefix += "-hf"
+                    logger.info(f"Using DHT prefix: {dht_prefix}")
+                result = super().from_pretrained(model_name_or_path, *args, dht_prefix=dht_prefix, **kwargs)
+                config = result[0] if isinstance(result, tuple) else result
+                config.use_cache = True
+                if config.pad_token_id is None:
+                    config.pad_token_id = 0
+                return result
+    else:
+        class DistributedQwen3Config:
+            def __init__(self, *a, **kw): raise ImportError("Qwen3 dense requires transformers >= 4.51.0")
+"""))
+
+(qwen3_dir / "model.py").write_text(textwrap.dedent("""\
+    import torch, torch.nn as nn
+    from hivemind.utils.logging import get_logger
+    from transformers.modeling_outputs import BaseModelOutputWithPast
+    try:
+        from transformers import Qwen3ForCausalLM, Qwen3Model, Qwen3PreTrainedModel
+    except ImportError:
+        Qwen3ForCausalLM = None
+        Qwen3Model = None
+        Qwen3PreTrainedModel = None
+    from petals.client.from_pretrained import FromPretrainedMixin
+    from petals.client.lm_head import LMHead
+    from petals.client.ptune import PTuneMixin
+    from petals.client.remote_generation import RemoteGenerationMixin, RemotePastKeyValues
+    from petals.client.remote_sequential import RemoteSequential
+    from petals.models.qwen3.config import DistributedQwen3Config
+    from petals.utils.auto_config import DefaultRevisionMixin
+    logger = get_logger(__name__)
+
+    if Qwen3Model is not None:
+        class DistributedQwen3Model(DefaultRevisionMixin, FromPretrainedMixin, PTuneMixin, Qwen3Model):
+            _keys_to_ignore_on_load_missing = PTuneMixin._keys_to_ignore_on_load_missing
+            _keys_to_ignore_on_load_unexpected = [r"^model\\\\.layers\\\\."]
+            config_class = DistributedQwen3Config
+            def __init__(self, config, *, dht=None):
+                n_layer, config.num_hidden_layers = config.num_hidden_layers, 0
+                super().__init__(config)
+                assert len(self.layers) == 0
+                config.num_hidden_layers = n_layer
+                self.layers = RemoteSequential(config, dht=dht)
+                self.requires_grad_(False)
+                self.init_prompts(config)
+            def forward(self, input_ids=None, past_key_values=None, attention_mask=None,
+                        position_ids=None, head_mask=None, inputs_embeds=None, use_cache=None,
+                        output_attentions=None, output_hidden_states=None,
+                        return_dict=None, cache_position=None):
+                if input_ids is not None and inputs_embeds is not None:
+                    raise ValueError("Cannot specify both input_ids and inputs_embeds")
+                elif input_ids is not None:
+                    input_shape = input_ids.size()
+                    input_ids = input_ids.view(-1, input_shape[-1])
+                elif inputs_embeds is not None:
+                    input_shape = inputs_embeds.size()[:-1]
+                else:
+                    raise ValueError("Must specify either input_ids or inputs_embeds")
+                assert attention_mask is None or (attention_mask == 1).all()
+                assert use_cache is None or use_cache
+                assert not output_attentions
+                assert not output_hidden_states
+                assert return_dict is None or return_dict
+                if inputs_embeds is None:
+                    inputs_embeds = self.embed_tokens(input_ids)
+                use_prompts = self.config.tuning_mode and "ptune" in self.config.tuning_mode and self.h.position == 0
+                if use_prompts:
+                    prompts, intermediate_prompts = self.get_prompt(inputs_embeds.shape[0])
+                    inputs_embeds = torch.cat([prompts, inputs_embeds], dim=1)
+                else:
+                    prompts = intermediate_prompts = None
+                hidden_states = inputs_embeds
+                output_shape = input_shape + (hidden_states.size(-1),)
+                if past_key_values is None:
+                    past_key_values = RemotePastKeyValues()
+                past_key_values.update_seen(hidden_states.size(1))
+                hidden_states = self.layers(hidden_states, prompts=intermediate_prompts,
+                    hypo_ids=past_key_values.hypo_ids if past_key_values is not None else None)
+                if use_prompts:
+                    hidden_states = hidden_states[:, self.pre_seq_len:]
+                hidden_states = self.norm(hidden_states)
+                hidden_states = hidden_states.view(output_shape)
+                return BaseModelOutputWithPast(last_hidden_state=hidden_states,
+                    past_key_values=past_key_values, hidden_states=None, attentions=None)
+            @property
+            def word_embeddings(self): return self.embed_tokens
+            @property
+            def word_embeddings_layernorm(self): return nn.Identity()
+            @property
+            def h(self): return self.layers
+            @property
+            def ln_f(self): return self.norm
+
+        class DistributedQwen3ForCausalLM(FromPretrainedMixin, RemoteGenerationMixin, Qwen3ForCausalLM):
+            _keys_to_ignore_on_load_missing = DistributedQwen3Model._keys_to_ignore_on_load_missing
+            _keys_to_ignore_on_load_unexpected = DistributedQwen3Model._keys_to_ignore_on_load_unexpected
+            config_class = DistributedQwen3Config
+            def __init__(self, config):
+                Qwen3PreTrainedModel.__init__(self, config)
+                self.model = DistributedQwen3Model(config)
+                self.lm_head = LMHead(config)
+                self.post_init()
+            def get_output_embeddings(self): return self.lm_head
+            @property
+            def transformer(self): return self.model
+    else:
+        class DistributedQwen3Model:
+            def __init__(self, *a, **kw): raise ImportError("Qwen3 dense requires transformers >= 4.51.0")
+        class DistributedQwen3ForCausalLM:
+            def __init__(self, *a, **kw): raise ImportError("Qwen3 dense requires transformers >= 4.51.0")
+"""))
+
 # ---------- Update models/__init__.py ----------
 models_init = models_dir / "__init__.py"
 text = models_init.read_text()
@@ -872,6 +1096,15 @@ if marker not in text:
     print("Patched petals models/__init__.py with Qwen3.5 MoE support")
 else:
     print("Qwen3.5 MoE already registered in petals models/__init__.py")
+
+text = models_init.read_text()
+marker3 = "from petals.models.qwen3 import *"
+if marker3 not in text:
+    text += "\ntry:\n    from petals.models.qwen3 import *\nexcept ImportError:\n    pass  # Qwen3 dense requires transformers >= 4.51.0\n"
+    models_init.write_text(text)
+    print("Patched petals models/__init__.py with Qwen3 dense support")
+else:
+    print("Qwen3 dense already registered in petals models/__init__.py")
 
 print("Qwen3.5 MoE overlay applied to petals")
 QWEN_PATCH
