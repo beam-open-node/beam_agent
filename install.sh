@@ -407,6 +407,29 @@ PY
       esac
     fi
   fi
+  # Patch petals __init__.py to remove the hard transformers version assertion
+  # (petals 2.x asserts transformers<4.35 but Beam needs transformers>=5.2).
+  "$petals_venv/bin/python" - <<'PY'
+import pathlib, re, sysconfig
+site_pkgs = pathlib.Path(sysconfig.get_paths()["purelib"])
+init_path = site_pkgs / "petals" / "__init__.py"
+if not init_path.exists():
+    print("petals __init__.py not found; skipping version assertion patch")
+    raise SystemExit(0)
+text = init_path.read_text()
+patched = re.sub(
+    r'^\s*assert\s+version\.parse\([^)]+\)\s*<=\s*version\.parse\(transformers\.__version__\).*$',
+    '# (assertion removed by Beam installer to allow transformers>=5)',
+    text,
+    flags=re.MULTILINE,
+)
+if patched == text:
+    print("petals transformers version assertion not found or already patched")
+else:
+    init_path.write_text(patched)
+    print("Patched petals __init__.py: removed transformers version assertion")
+PY
+
   accelerate_ok="false"
   for accelerate_ver in $accelerate_specs; do
     accelerate_pkg="$accelerate_ver"
