@@ -337,6 +337,7 @@ PY
     "peft>=0.12.0" \
     "safetensors>=0.4.0" \
     "aiohttp" "pyyaml" \
+    "dijkstar>=2.6.0" \
     || true
   hivemind_spec="${BEAM_PETALS_HIVEMIND_SPEC:-hivemind @ git+https://github.com/learning-at-home/hivemind.git@213bff98a62accb91f254e2afdccbf1d69ebdea9}"
   hivemind_pip_args=()
@@ -558,7 +559,7 @@ fi
   [[ -n "${BEAM_HOP_COUNTS:-}" ]] && echo "export BEAM_HOP_COUNTS=\"${BEAM_HOP_COUNTS}\""
   [[ -n "${BEAM_SINGLE_NODE:-}" ]] && echo "export BEAM_SINGLE_NODE=\"${BEAM_SINGLE_NODE}\""
   [[ -n "${BEAM_MAX_BLOCKS:-}" ]] && echo "export BEAM_MAX_BLOCKS=\"${BEAM_MAX_BLOCKS}\""
-  echo "exec \"$binary_path\" --config \"$config_path\""
+  echo "exec \"$binary_path\" run --config \"$config_path\""
 } > start_agent.sh
 chmod +x start_agent.sh
 
