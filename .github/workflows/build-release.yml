@@ -14,9 +14,17 @@ permissions:
   contents: write
 
 jobs:
-  build-linux:
-    name: Build Linux binary
-    runs-on: ubuntu-latest
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            artifact: beam-node-agent-linux
+          - os: macos-latest
+            artifact: beam-node-agent-macos
+
+    runs-on: ${{ matrix.os }}
 
     steps:
       - name: Checkout source
@@ -32,21 +40,31 @@ jobs:
           pip install --upgrade pip
           pip install pyinstaller aiohttp pyyaml "pydantic>=2.0"
 
-      - name: Build binary (PyInstaller onedir)
+      - name: Build binary
         run: |
-          pyinstaller beam-node-agent-linux.spec
+          pyinstaller --onefile \
+            --name ${{ matrix.artifact }} \
+            --hidden-import pdb \
+            --hidden-import bdb \
+            --hidden-import cmd \
+            --hidden-import code \
+            --hidden-import cmath \
+            --hidden-import pickletools \
+            beam_node_agent/main.py
 
-      # ------------------------------------------------------------------ #
-      # The onedir output is dist/beam-node-agent-linux/<files>.             #
-      # Produce two release assets:                                           #
-      #   • beam-node-agent-linux        – the EXE (for direct curl usage)  #
-      #   • beam-node-agent-linux.tar.gz – full onedir bundle               #
-      # ------------------------------------------------------------------ #
-      - name: Package artifacts
-        run: |
-          cp dist/beam-node-agent-linux/beam-node-agent-linux ./beam-node-agent-linux
-          tar -czf beam-node-agent-linux.tar.gz \
-              -C dist/beam-node-agent-linux .
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.artifact }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
 
       - name: Determine release tag
         id: tag
@@ -65,8 +83,8 @@ jobs:
           body: |
             Automated binary build from commit ${{ github.sha }}.
           files: |
-            beam-node-agent-linux
-            beam-node-agent-linux.tar.gz
+            beam-node-agent-linux/beam-node-agent-linux
+            beam-node-agent-macos/beam-node-agent-macos
           make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
