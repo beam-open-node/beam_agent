@@ -134,16 +134,26 @@ def main():
 
             # Use chat template when messages are provided (proper special tokens)
             if messages and hasattr(tokenizer, "apply_chat_template"):
-                input_ids = tokenizer.apply_chat_template(
+                encoded = tokenizer.apply_chat_template(
                     messages,
                     add_generation_prompt=True,
                     return_tensors="pt",
                 )
+                # apply_chat_template may return a bare tensor or a BatchEncoding
+                if isinstance(encoded, torch.Tensor):
+                    input_ids = encoded
+                else:
+                    input_ids = encoded["input_ids"]
                 attention_mask = torch.ones_like(input_ids)
             else:
-                inputs = tokenizer(prompt, return_tensors="pt")
-                input_ids = inputs["input_ids"]
-                attention_mask = inputs["attention_mask"]
+                encoded = tokenizer(prompt, return_tensors="pt")
+                input_ids = encoded["input_ids"]
+                attention_mask = encoded["attention_mask"]
+
+            _emit({"type": "log", "job_id": job_id,
+                   "message": f"tokenized: input_ids type={type(input_ids).__name__} "
+                              f"shape={tuple(input_ids.shape)} "
+                              f"attention_mask shape={tuple(attention_mask.shape)}"})
 
             # The Petals server rejects any single inference step where
             # batch_size * seq_len > max_batch_size (8192 for MQA models).
