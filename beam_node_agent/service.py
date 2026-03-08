@@ -181,8 +181,14 @@ def main():
                 output_ids = model.generate(**gen_kwargs)
 
             # Decode only the newly generated tokens (skip the prompt).
-            new_ids = output_ids[0, input_ids.shape[-1]:]
+            prompt_len = input_ids.shape[-1]
+            new_ids = output_ids[0, prompt_len:]
             text = tokenizer.decode(new_ids, skip_special_tokens=True)
+
+            _emit({"type": "log", "job_id": job_id,
+                   "message": f"generate done: output_ids={tuple(output_ids.shape)} "
+                              f"prompt_len={prompt_len} new_tokens={len(new_ids)} "
+                              f"decoded_len={len(text)} text_preview={text[:120]!r}"})
 
             # Emit one chunk at a time so the frontend streams word-by-word.
             words = text.split(" ")
@@ -374,6 +380,9 @@ class _InferenceSubprocess:
                     continue
                 if mtype == "warmup_error":
                     log.warning("InferenceWorker warmup error: %s", msg.get("message"))
+                    continue
+                if mtype == "log":
+                    log.info("InferenceWorker: %s", msg.get("message"))
                     continue
                 yield msg
                 if mtype in ("done", "error"):
@@ -904,6 +913,10 @@ class NodeAgent:
     ) -> None:
         async with self._ws_send_lock:
             if ws.closed:
+                log.warning(
+                    "WS closed, dropping message: type=%s job_id=%s",
+                    payload.get("type"), payload.get("job_id"),
+                )
                 return
             await ws.send_json(payload)
 
