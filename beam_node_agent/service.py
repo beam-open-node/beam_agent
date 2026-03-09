@@ -133,12 +133,25 @@ def main():
             import torch
 
             # Use chat template when messages are provided (proper special tokens)
+            # enable_thinking=False suppresses Qwen3's <think> reasoning blocks,
+            # which would otherwise consume most/all of max_new_tokens before
+            # producing a user-visible answer.
             if messages and hasattr(tokenizer, "apply_chat_template"):
-                encoded = tokenizer.apply_chat_template(
-                    messages,
+                template_kwargs = dict(
                     add_generation_prompt=True,
                     return_tensors="pt",
                 )
+                # Qwen3 chat templates accept enable_thinking to control
+                # whether the model emits <think>...</think> blocks.
+                try:
+                    encoded = tokenizer.apply_chat_template(
+                        messages, enable_thinking=False, **template_kwargs,
+                    )
+                except TypeError:
+                    # Tokenizer does not support enable_thinking kwarg
+                    encoded = tokenizer.apply_chat_template(
+                        messages, **template_kwargs,
+                    )
                 # apply_chat_template may return a bare tensor or a BatchEncoding
                 if isinstance(encoded, torch.Tensor):
                     input_ids = encoded
@@ -183,15 +196,32 @@ def main():
             # Decode only the newly generated tokens (skip the prompt).
             prompt_len = input_ids.shape[-1]
             new_ids = output_ids[0, prompt_len:]
-            text = tokenizer.decode(new_ids, skip_special_tokens=True)
+            raw_text = tokenizer.decode(new_ids, skip_special_tokens=True)
+
+            # Strip <think>...</think> reasoning blocks (Qwen3 thinking model).
+            import re
+            # Remove complete <think>...</think> blocks
+            text = re.sub(r"<think>.*?</think>", "", raw_text, flags=re.DOTALL).strip()
+            # If generation cut off mid-think (no closing </think>), remove the
+            # incomplete block entirely.
+            if "<think>" in text:
+                text = text[:text.index("<think>")].strip()
 
             _emit({"type": "log", "job_id": job_id,
                    "message": f"generate done: output_ids={tuple(output_ids.shape)} "
                               f"prompt_len={prompt_len} new_tokens={len(new_ids)} "
-                              f"decoded_len={len(text)} text_preview={text[:120]!r}"})
+                              f"raw_len={len(raw_text)} cleaned_len={len(text)} "
+                              f"raw_preview={raw_text[:200]!r} "
+                              f"clean_preview={text[:200]!r}"})
+
+            if not text:
+                _emit({"type": "log", "job_id": job_id,
+                       "message": "WARNING: cleaned text is empty after stripping "
+                                  "<think> blocks. Model may need more max_new_tokens "
+                                  "to finish reasoning and produce an answer."})
 
             # Emit one chunk at a time so the frontend streams word-by-word.
-            words = text.split(" ")
+            words = text.split(" ") if text else []
             for i, word in enumerate(words):
                 chunk = word if i == 0 else " " + word
                 if chunk:
@@ -1012,7 +1042,7 @@ class NodeAgent:
         so it has full access to torch, cmath, and all other C-extension stdlib
         modules — none of which are available inside the PyInstaller binary process.
         """
-        max_new_tokens = min(max_tokens if max_tokens and max_tokens > 0 else 256, 64)
+        max_new_tokens = min(max_tokens if max_tokens and max_tokens > 0 else 512, 512)
         temp_value = 1.0 if temperature is None else float(temperature)
 
         worker = self._ensure_inference_worker()
