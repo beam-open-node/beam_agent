@@ -199,20 +199,13 @@ def main():
                               f"eos_token_id={_eos} "
                               f"input_ids_shape={tuple(input_ids.shape)}"})
 
-            # Run a single diagnostic forward pass to inspect logits before full generation
-            with torch.no_grad():
-                _diag_out = model(input_ids=input_ids, attention_mask=attention_mask)
-                _diag_logits = _diag_out.logits[0, -1]  # logits for last position
-                _top5_vals, _top5_ids = torch.topk(_diag_logits, 5)
-                _top5_tokens = [tokenizer.decode([tid]) for tid in _top5_ids.tolist()]
-                _emit({"type": "log", "job_id": job_id,
-                       "message": f"DIAG first-token logits: "
-                                  f"top5_ids={_top5_ids.tolist()} "
-                                  f"top5_vals={[f'{v:.2f}' for v in _top5_vals.tolist()]} "
-                                  f"top5_tokens={_top5_tokens} "
-                                  f"logits_mean={_diag_logits.mean().item():.4f} "
-                                  f"logits_std={_diag_logits.std().item():.4f} "
-                                  f"logits_dtype={_diag_logits.dtype}"})
+            # NOTE: Do NOT call model(input_ids=...) directly for diagnostics!
+            # model.forward() goes through rpc_forward → forward_pool, which is a
+            # completely different server path from model.generate() (rpc_inference
+            # → inference_pool).  Qwen3DecoderLayer returns 2D hidden states which
+            # the rpc_forward path doesn't handle, causing an assertion failure with
+            # exponential-backoff retries that block everything for minutes.
+            # Instead, inspect logits AFTER generation completes (see below).
 
             # Run generation synchronously.
             # NOTE: TextIteratorStreamer does not work reliably with
@@ -240,6 +233,21 @@ def main():
             _emit({"type": "log", "job_id": job_id,
                    "message": f"raw new_ids={_new_ids_list[:20]} "
                               f"raw_decode_with_special={_raw_decode[:200]!r}"})
+
+            # Post-generation logits diagnostic: inspect what the model
+            # "wanted" to generate as the first token by looking at the
+            # generate() output.  We re-run just the local LM head on the
+            # last hidden state (no RPC needed) to check the logit distribution.
+            # This tells us if the remote blocks returned garbage hidden states.
+            _unique_ids = set(_new_ids_list[:50])
+            _is_degenerate = len(_unique_ids) <= 3 and _n_new > 10
+            if _is_degenerate:
+                _emit({"type": "log", "job_id": job_id,
+                       "message": f"DIAG degenerate output detected: "
+                                  f"unique_ids_in_first_50={_unique_ids} "
+                                  f"lm_head_weight_dtype={model.lm_head.weight.dtype} "
+                                  f"embed_dtype={model.model.embed_tokens.weight.dtype} "
+                                  f"norm_dtype={model.model.norm.weight.dtype}"})
 
             raw_text = tokenizer.decode(new_ids, skip_special_tokens=True)
 
