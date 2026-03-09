@@ -139,6 +139,21 @@ def main():
                 model, tokenizer = _load_model(model_id, peers, None, None)
                 current_model_id = model_id
 
+                # Diagnostic: verify client-side weights loaded correctly after every
+                # model load.  A near-zero lm_head norm means the weight was never
+                # loaded from the checkpoint and logits will be degenerate.
+                _lm_w = model.lm_head.weight
+                _emb_w = model.model.embed_tokens.weight
+                _tied = _lm_w is _emb_w
+                _emit({"type": "log", "job_id": "",
+                       "message": (
+                           f"MODEL LOAD DIAG: lm_head shape={tuple(_lm_w.shape)} "
+                           f"dtype={_lm_w.dtype} norm={_lm_w.norm().item():.4f} "
+                           f"tied_to_embed={_tied} "
+                           f"embed_norm={_emb_w.norm().item():.4f} "
+                           f"norm_weight_norm={model.model.norm.weight.norm().item():.4f}"
+                       )})
+
             import torch
 
             # Use chat template when messages are provided (proper special tokens).
@@ -242,12 +257,32 @@ def main():
             _unique_ids = set(_new_ids_list[:50])
             _is_degenerate = len(_unique_ids) <= 3 and _n_new > 10
             if _is_degenerate:
+                _lm_w = model.lm_head.weight
+                _emb_w = model.model.embed_tokens.weight
+                _tied = _lm_w is _emb_w
+                _row_norms = _lm_w.norm(dim=1)
+                _avg_row_norm = _row_norms.mean().item()
+                # Report stats for each repeated token id
+                _dedup_ids = list(_unique_ids)
+                _row_stats = {
+                    tid: {
+                        "norm": _row_norms[tid].item(),
+                        "rank_by_norm": int((_row_norms > _row_norms[tid]).sum().item()),
+                    }
+                    for tid in _dedup_ids if tid < _lm_w.shape[0]
+                }
                 _emit({"type": "log", "job_id": job_id,
-                       "message": f"DIAG degenerate output detected: "
-                                  f"unique_ids_in_first_50={_unique_ids} "
-                                  f"lm_head_weight_dtype={model.lm_head.weight.dtype} "
-                                  f"embed_dtype={model.model.embed_tokens.weight.dtype} "
-                                  f"norm_dtype={model.model.norm.weight.dtype}"})
+                       "message": (
+                           f"DIAG degenerate output detected: "
+                           f"unique_ids_in_first_50={_unique_ids} "
+                           f"lm_head_weight_dtype={_lm_w.dtype} "
+                           f"lm_head_norm={_lm_w.norm().item():.4f} "
+                           f"avg_row_norm={_avg_row_norm:.4f} "
+                           f"repeated_token_row_stats={_row_stats} "
+                           f"lm_head_tied_to_embed={_tied} "
+                           f"embed_dtype={_emb_w.dtype} "
+                           f"norm_dtype={model.model.norm.weight.dtype}"
+                       )})
 
             raw_text = tokenizer.decode(new_ids, skip_special_tokens=True)
 
