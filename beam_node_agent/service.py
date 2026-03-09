@@ -889,7 +889,15 @@ class NodeAgent:
             )
             return
 
-        log.info("Starting inference: job_id=%s model_id=%s", job_id, model_id)
+        # Log the messages to distinguish real requests from task requests
+        _msg_summary = "; ".join(
+            f"{m.get('role','?')}: {str(m.get('content',''))[:80]}"
+            for m in (messages or [])
+        )
+        log.info(
+            "Starting inference: job_id=%s model_id=%s n_messages=%d messages=[%s]",
+            job_id, model_id, len(messages or []), _msg_summary,
+        )
         async with self._inference_lock:
             try:
                 token_count = 0
