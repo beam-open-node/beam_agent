@@ -123,6 +123,10 @@ def main():
         temperature = float(req.get("temperature") or 1.0)
         do_sample = temperature > 0.0
 
+        # Log the full messages array for debugging prompt routing
+        _emit({"type": "log", "job_id": job_id,
+               "message": f"RECV job messages={json.dumps(messages)[:500]}"})
+
         try:
             if model is None or current_model_id != model_id:
                 from petals.constants import PUBLIC_INITIAL_PEERS
@@ -770,7 +774,7 @@ class NodeAgent:
             headers = self.identity.sign_request(timestamp, "")
 
             try:
-                async with self.session.ws_connect(url, headers=headers) as ws:
+                async with self.session.ws_connect(url, headers=headers, heartbeat=30) as ws:
                     log.info("Connected to gateway websocket at %s", url)
                     backoff = 1.0
                     async for msg in ws:
