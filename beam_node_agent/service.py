@@ -164,10 +164,14 @@ def main():
                 input_ids = encoded["input_ids"]
                 attention_mask = encoded["attention_mask"]
 
+            # Decode the tokenized prompt back to text to verify chat template application
+            _rendered_prompt = tokenizer.decode(input_ids[0], skip_special_tokens=False)
             _emit({"type": "log", "job_id": job_id,
                    "message": f"tokenized: input_ids type={type(input_ids).__name__} "
                               f"shape={tuple(input_ids.shape)} "
-                              f"attention_mask shape={tuple(attention_mask.shape)}"})
+                              f"attention_mask shape={tuple(attention_mask.shape)} "
+                              f"token_ids={input_ids[0].tolist()[:30]} "
+                              f"rendered_prompt={_rendered_prompt[:300]!r}"})
 
             # The Petals server rejects any single inference step where
             # batch_size * seq_len > max_batch_size (8192 for MQA models).
@@ -194,6 +198,21 @@ def main():
                               f"do_sample={do_sample} temperature={temperature} "
                               f"eos_token_id={_eos} "
                               f"input_ids_shape={tuple(input_ids.shape)}"})
+
+            # Run a single diagnostic forward pass to inspect logits before full generation
+            with torch.no_grad():
+                _diag_out = model(input_ids=input_ids, attention_mask=attention_mask)
+                _diag_logits = _diag_out.logits[0, -1]  # logits for last position
+                _top5_vals, _top5_ids = torch.topk(_diag_logits, 5)
+                _top5_tokens = [tokenizer.decode([tid]) for tid in _top5_ids.tolist()]
+                _emit({"type": "log", "job_id": job_id,
+                       "message": f"DIAG first-token logits: "
+                                  f"top5_ids={_top5_ids.tolist()} "
+                                  f"top5_vals={[f'{v:.2f}' for v in _top5_vals.tolist()]} "
+                                  f"top5_tokens={_top5_tokens} "
+                                  f"logits_mean={_diag_logits.mean().item():.4f} "
+                                  f"logits_std={_diag_logits.std().item():.4f} "
+                                  f"logits_dtype={_diag_logits.dtype}"})
 
             # Run generation synchronously.
             # NOTE: TextIteratorStreamer does not work reliably with
