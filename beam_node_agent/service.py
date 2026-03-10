@@ -656,12 +656,13 @@ class NodeAgent:
 
         url = f"{self.config.control_plane.url}/api/v1/beam/pairing/sessions/{self._pairing_session_id}"
         headers = {"x-session-secret": self._pairing_session_secret}
+        backoff = 3  # seconds, increases on repeated failures
 
         while not self.identity.node_id:
             try:
                 async with self.session.get(url, headers=headers) as resp:
                     if resp.status != 200:
-                        await asyncio.sleep(3)
+                        await asyncio.sleep(backoff)
                         continue
 
                     data = await resp.json()
@@ -687,8 +688,13 @@ class NodeAgent:
                             self._awaiting_remote_pairing = False
                             return
                         except Exception as exc:
-                            log.warning("Remote pairing registration failed: %s", exc)
-                            await asyncio.sleep(3)
+                            backoff = min(backoff * 2, 120)
+                            log.warning(
+                                "Remote pairing registration failed (retry in %ds): %s",
+                                backoff,
+                                exc,
+                            )
+                            await asyncio.sleep(backoff)
                             continue
                     if status == "expired":
                         log.warning("Pairing session expired")
@@ -696,8 +702,9 @@ class NodeAgent:
                         await self._start_remote_pairing_session()
                         return
             except Exception as exc:
-                log.warning("Remote pairing poll error: %s", exc)
-            await asyncio.sleep(3)
+                backoff = min(backoff * 2, 120)
+                log.warning("Remote pairing poll error (retry in %ds): %s", backoff, exc)
+            await asyncio.sleep(backoff)
 
         await asyncio.sleep(3)
 
