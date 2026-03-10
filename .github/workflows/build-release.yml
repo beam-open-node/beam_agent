@@ -45,17 +45,19 @@ jobs:
         run: |
           pyinstaller --onefile \
             --name ${{ matrix.artifact }} \
+            --paths . \
+            --hidden-import beam_node_agent \
+            --hidden-import beam_node_agent.config \
+            --hidden-import beam_node_agent.service \
+            --hidden-import beam_node_agent.petals_wrapper \
+            --hidden-import beam_node_agent.node_identity \
+            --hidden-import beam_node_agent.beam_node_agent \
             --hidden-import pdb \
             --hidden-import bdb \
             --hidden-import cmd \
             --hidden-import code \
             --hidden-import cmath \
             --hidden-import pickletools \
-            --hidden-import beam_node_agent \
-            --hidden-import beam_node_agent.config \
-            --hidden-import beam_node_agent.service \
-            --hidden-import beam_node_agent.petals_wrapper \
-            --hidden-import beam_node_agent.node_identity \
             beam_node_agent/main.py
 
       - name: Upload artifact

@@ -2,13 +2,18 @@ import argparse
 import asyncio
 import logging
 
-try:
-    from .config import load_config
-    from .service import NodeAgent
-except ImportError:
-    # Allow running as a script entrypoint in frozen builds (PyInstaller).
-    from beam_node_agent.config import load_config
-    from beam_node_agent.service import NodeAgent
+import os
+import sys
+
+# Ensure the package root is on sys.path so absolute imports work in both
+# normal Python and PyInstaller frozen builds.
+_pkg_dir = os.path.dirname(os.path.abspath(__file__))
+_root_dir = os.path.dirname(_pkg_dir)
+if _root_dir not in sys.path:
+    sys.path.insert(0, _root_dir)
+
+from beam_node_agent.config import load_config
+from beam_node_agent.service import NodeAgent
 
 
 def main():

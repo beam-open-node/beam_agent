@@ -12,9 +12,9 @@ from typing import Any, AsyncIterator, Dict, Iterator, Optional
 import aiohttp
 from aiohttp import web
 
-from .config import BeamConfig
-from .node_identity import NodeIdentity
-from .petals_wrapper import PetalsWrapper
+from beam_node_agent.config import BeamConfig
+from beam_node_agent.node_identity import NodeIdentity
+from beam_node_agent.petals_wrapper import PetalsWrapper
 
 log = logging.getLogger(__name__)
 
