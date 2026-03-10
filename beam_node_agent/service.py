@@ -1269,6 +1269,7 @@ class NodeAgent:
             },
             "active_jobs": [],
             "current_assignment": self.current_assignment or None,
+            "p2p_addrs": self.petals.local_p2p_addrs() or None,
         }
 
         body_json = json.dumps(payload)
@@ -1367,19 +1368,26 @@ class NodeAgent:
             else 0
         )
 
+        # initial_peers: list of multiaddrs from the backend (beam DHT bootstrap).
+        # Falls back to None which means the petals server / inference worker
+        # will use PUBLIC_INITIAL_PEERS.
+        new_peers: Optional[list] = assignment.get("initial_peers") or None
+        if isinstance(new_peers, list) and not new_peers:
+            new_peers = None  # empty list → treat as "not provided"
+
+        current_peers = (
+            self.current_assignment.get("initial_peers")
+            if self.current_assignment
+            else None
+        )
+
         changed = (
             new_mid != current_mid
             or new_range != current_range
+            or sorted(new_peers or []) != sorted(current_peers or [])
         )
         if changed:
-            # initial_peers: list of multiaddrs from the backend (beam DHT bootstrap).
-            # Falls back to None which means the petals server / inference worker
-            # will use PUBLIC_INITIAL_PEERS.
-            new_peers: Optional[list] = assignment.get("initial_peers") or None
-            if isinstance(new_peers, list) and not new_peers:
-                new_peers = None  # empty list → treat as "not provided"
-
-            log.info(f"New assignment received: {new_mid} blocks {new_range}")
+            log.info(f"New assignment received: {new_mid} blocks {new_range} peers={len(new_peers or [])}")
 
             self.current_assignment = {
                 "model_id": new_mid,
