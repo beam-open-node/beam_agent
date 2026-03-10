@@ -25,8 +25,11 @@ class NodeIdentity:
 
     def _generate_fingerprint(self) -> str:
         """
-        Generates a semi-stable identifier for this machine.
-        For v0, we rely on hostname + platform info + mac address hash.
+        Generates a stable-per-container identifier for this machine.
+
+        Uses hostname + platform info + mac address + a persisted random
+        component so that identical Docker containers (same image, platform)
+        still get unique fingerprints.
         """
         node_name = platform.node()
         system = platform.system()
@@ -34,7 +37,25 @@ class NodeIdentity:
         # uuid.getnode() returns mac address as int
         mac_addr = str(uuid.getnode())
 
-        raw = f"{node_name}|{system}|{machine}|{mac_addr}"
+        # Persisted random salt ensures uniqueness across identical containers.
+        # Stored next to the state file so it survives restarts but is unique
+        # per container filesystem.
+        salt_file = self.state_file + ".salt"
+        try:
+            if os.path.exists(salt_file):
+                with open(salt_file, "r") as f:
+                    salt = f.read().strip()
+            else:
+                salt = uuid.uuid4().hex
+                parent_dir = os.path.dirname(salt_file)
+                if parent_dir:
+                    os.makedirs(parent_dir, exist_ok=True)
+                with open(salt_file, "w") as f:
+                    f.write(salt)
+        except Exception:
+            salt = uuid.uuid4().hex
+
+        raw = f"{node_name}|{system}|{machine}|{mac_addr}|{salt}"
         return hashlib.sha256(raw.encode()).hexdigest()
 
     def _load_state(self):
