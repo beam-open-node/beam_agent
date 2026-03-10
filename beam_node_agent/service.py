@@ -1189,6 +1189,8 @@ class NodeAgent:
                     raise Exception(f"Registration failed: {resp.status} - {text}")
 
                 data = await resp.json()
+                log.info("Registration response: node_id=%s, assignment=%s, debug=%s",
+                         data.get("node_id", "?")[:8], data.get("assignment"), data.get("debug_info"))
                 self.identity.save_state(data["node_id"], data["node_secret"])
 
                 assignment = data.get("assignment")
