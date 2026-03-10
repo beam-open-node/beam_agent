@@ -15,6 +15,7 @@ class PetalsConfig(BaseModel):
     port: int = Field(default=31337, alias="PETALS_PORT")
     public_ip: Optional[str] = Field(default=None, alias="PETALS_PUBLIC_IP")
     gpu_vram_limit: float = Field(default=0.9, alias="GPU_VRAM_LIMIT")
+    device: Optional[str] = Field(default=None, alias="PETALS_DEVICE")  # e.g. "cuda:0"
 
 
 class AgentConfig(BaseModel):
@@ -67,6 +68,8 @@ def load_config(config_path: str = "config.yaml") -> BeamConfig:
     petals_data = config_data.get("petals", {})
     if os.environ.get("PETALS_PORT", "").strip():
         petals_data["port"] = int(os.environ["PETALS_PORT"])
+    if os.environ.get("PETALS_DEVICE", "").strip():
+        petals_data["device"] = os.environ["PETALS_DEVICE"]
 
     agent_data = config_data.get("agent", {})
     if "BEAM_PAIRING_TOKEN" in os.environ:

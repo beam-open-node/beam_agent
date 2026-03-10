@@ -17,11 +17,16 @@ class PetalsWrapper:
     """
 
     def __init__(
-        self, port: int, public_ip: Optional[str] = None, gpu_vram_limit: float = 0.9
+        self,
+        port: int,
+        public_ip: Optional[str] = None,
+        gpu_vram_limit: float = 0.9,
+        device: Optional[str] = None,
     ):
         self.port = port
         self.public_ip = public_ip
         self.gpu_vram_limit = gpu_vram_limit
+        self.device = device  # e.g. "cuda:0", "cuda:1"
         self.process: Optional[subprocess.Popen] = None
         self._stdout_thread: Optional[threading.Thread] = None
         self._stderr_thread: Optional[threading.Thread] = None
@@ -96,6 +101,10 @@ class PetalsWrapper:
         # petals server joins the beam private swarm instead of the public one.
         if initial_peers:
             cmd.extend(["--initial_peers"] + list(initial_peers))
+
+        # Pin to a specific GPU (e.g. "cuda:1") for multi-GPU machines
+        if self.device:
+            cmd.extend(["--device", self.device])
 
         # Add public IP if configured (crucial for p2p)
         if self.public_ip:

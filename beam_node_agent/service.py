@@ -438,6 +438,7 @@ class NodeAgent:
             port=config.petals.port,
             public_ip=config.petals.public_ip,
             gpu_vram_limit=config.petals.gpu_vram_limit,
+            device=config.petals.device,
         )
         self._gpu_spec = self._resolve_gpu_spec()
         self.session: Optional[aiohttp.ClientSession] = None
