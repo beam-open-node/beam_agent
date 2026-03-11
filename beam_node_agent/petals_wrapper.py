@@ -71,6 +71,16 @@ class PetalsWrapper:
         self._last_exit_time: Optional[int] = None
         self._local_p2p_addrs: List[str] = []
 
+    def _select_dtype(self) -> str:
+        """Pick the best torch dtype for this machine's hardware."""
+        try:
+            import torch
+            if torch.cuda.is_available():
+                return "float16"
+        except ImportError:
+            pass
+        return "bfloat16"
+
     def _stream_logs(self, stream, label: str):
         try:
             for line in iter(stream.readline, ""):
@@ -122,7 +132,7 @@ class PetalsWrapper:
             "--block_indices",
             block_range,
             "--torch_dtype",
-            "float16",  # Default optimization
+            self._select_dtype(),
         ]
 
         # If the control plane provided DHT bootstrap peers (Beam's private
@@ -186,6 +196,11 @@ class PetalsWrapper:
             except subprocess.TimeoutExpired:
                 log.warning("Petals process unresponsive, killing...")
                 self.process.kill()
+                self.process.wait(timeout=5)
+            # Give the GPU driver a moment to release CUDA resources before
+            # a new process tries to claim the device.  Without this, the
+            # next Petals start can see CUDA as unavailable.
+            time.sleep(2)
         self.process = None
         self._local_p2p_addrs = []
 
