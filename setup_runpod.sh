@@ -44,15 +44,13 @@ echo ""
 
 # 1. Install system dependencies
 echo ">>> Installing system dependencies..."
-apt-get update -qq && apt-get install -y -qq curl zstd
+apt-get update -qq && apt-get install -y -qq curl git zstd pciutils
 
 # 2. Install Ollama
-if ! command -v ollama &> /dev/null; then
-    echo ">>> Installing Ollama..."
-    curl -fsSL https://ollama.com/install.sh | sh
-else
-    echo ">>> Ollama already installed."
-fi
+# Always run the Ollama installer — it's idempotent and ensures GPU support
+# is properly configured (especially after pciutils is installed).
+echo ">>> Installing/updating Ollama..."
+curl -fsSL https://ollama.com/install.sh | sh
 
 # 3. Start Ollama daemon (with persistent model storage if /workspace is available)
 echo ">>> Starting Ollama daemon..."
@@ -135,10 +133,7 @@ if ! pgrep -x ollama > /dev/null; then
     sleep 3
 fi
 
-BEAM_GPU_NAME="$GPU_NAME" \\
-BEAM_GPU_VRAM_GB=$GPU_VRAM \\
-BEAM_GPU_COUNT=$GPU_COUNT \\
-python -m beam_node_agent.main --config config.yaml
+BEAM_GPU_NAME="$GPU_NAME" BEAM_GPU_VRAM_GB=$GPU_VRAM BEAM_GPU_COUNT=$GPU_COUNT python -m beam_node_agent.main --config config.yaml
 EOF
 chmod +x start_agent.sh
 
@@ -152,9 +147,6 @@ echo "The agent will print a 6-digit pairing code in the logs."
 echo "Enter it in the Rent Panel at $CONTROL_PLANE_URL to link your node."
 echo ""
 
-# 9. Optionally start immediately
-read -p "Start the agent now? [y/N] " -n 1 -r
-echo
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-    bash start_agent.sh
-fi
+# 9. Auto-start the agent
+echo ">>> Starting agent..."
+bash start_agent.sh
