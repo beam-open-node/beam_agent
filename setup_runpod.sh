@@ -20,7 +20,11 @@ echo "Model: $OLLAMA_MODEL"
 echo "GPU: $GPU_NAME (${GPU_VRAM}GB x${GPU_COUNT})"
 echo ""
 
-# 1. Install Ollama
+# 1. Install system dependencies
+echo ">>> Installing system dependencies..."
+apt-get update -qq && apt-get install -y -qq curl zstd
+
+# 2. Install Ollama
 if ! command -v ollama &> /dev/null; then
     echo ">>> Installing Ollama..."
     curl -fsSL https://ollama.com/install.sh | sh
@@ -28,8 +32,13 @@ else
     echo ">>> Ollama already installed."
 fi
 
-# 2. Start Ollama daemon
+# 3. Start Ollama daemon (with persistent model storage if /workspace is available)
 echo ">>> Starting Ollama daemon..."
+if [ -d "/workspace" ]; then
+    export OLLAMA_MODELS=/workspace/ollama_models
+    mkdir -p /workspace/ollama_models
+    echo "    Using persistent model storage: /workspace/ollama_models"
+fi
 if pgrep -x ollama > /dev/null; then
     echo "    Already running."
 else
@@ -37,11 +46,11 @@ else
     sleep 3
 fi
 
-# 3. Pull model
+# 4. Pull model
 echo ">>> Pulling model $OLLAMA_MODEL (this may take a while)..."
 ollama pull "$OLLAMA_MODEL"
 
-# 4. Clone beam_agent
+# 5. Clone beam_agent
 if [ -d "beam_agent" ]; then
     echo ">>> Updating existing beam_agent repo..."
     cd beam_agent
@@ -56,13 +65,13 @@ fi
 
 cd beam_agent
 
-# 5. Python venv
+# 6. Python venv
 echo ">>> Setting up Python environment..."
 python3 -m venv venv
 source venv/bin/activate
 pip install -q aiohttp pyyaml "pydantic>=2.0"
 
-# 6. Write config.yaml
+# 7. Write config.yaml
 echo ">>> Writing config.yaml..."
 cat > config.yaml << EOF
 control_plane:
@@ -84,11 +93,17 @@ agent:
     max_concurrent_jobs: 1
 EOF
 
-# 7. Write start script
+# 8. Write start script
 cat > start_agent.sh << EOF
 #!/bin/bash
 cd "$(pwd)"
 source venv/bin/activate
+
+# Use persistent model storage on RunPod volume
+if [ -d "/workspace" ]; then
+    export OLLAMA_MODELS=/workspace/ollama_models
+    mkdir -p /workspace/ollama_models
+fi
 
 # Ensure Ollama is running
 if ! pgrep -x ollama > /dev/null; then
@@ -114,7 +129,7 @@ echo "The agent will print a 6-digit pairing code in the logs."
 echo "Enter it in the Rent Panel at $CONTROL_PLANE_URL to link your node."
 echo ""
 
-# 8. Optionally start immediately
+# 9. Optionally start immediately
 read -p "Start the agent now? [y/N] " -n 1 -r
 echo
 if [[ $REPLY =~ ^[Yy]$ ]]; then
