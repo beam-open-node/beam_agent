@@ -68,10 +68,12 @@ def main():
         temperature = float(req.get("temperature") or 1.0)
 
         try:
+            think = req.get("think", False)
             payload = json.dumps({
                 "model": OLLAMA_MODEL,
                 "messages": messages,
                 "stream": True,
+                "think": think,
                 "options": {
                     "num_predict": max_new_tokens,
                     "temperature": temperature,
@@ -233,6 +235,7 @@ class _InferenceSubprocess:
         messages: list,
         max_new_tokens: int,
         temperature: float,
+        think: bool = False,
     ) -> Iterator[dict]:
         """
         Send one inference job to the worker and yield response dicts.
@@ -255,6 +258,7 @@ class _InferenceSubprocess:
                 "messages": messages,
                 "max_new_tokens": max_new_tokens,
                 "temperature": temperature,
+                "think": think,
             })
             assert self._proc.stdin is not None
             try:
@@ -923,6 +927,7 @@ class NodeAgent:
                     messages=messages,
                     max_new_tokens=max_new_tokens,
                     temperature=temp_value,
+                    think=False,
                 ):
                     loop.call_soon_threadsafe(queue.put_nowait, msg)
             except Exception as exc:
