@@ -14,7 +14,7 @@ from aiohttp import web
 
 from beam_node_agent.config import BeamConfig
 from beam_node_agent.node_identity import NodeIdentity
-from beam_node_agent.petals_wrapper import PetalsWrapper
+from beam_node_agent.ollama_wrapper import OllamaWrapper
 
 log = logging.getLogger(__name__)
 
@@ -37,9 +37,12 @@ log = logging.getLogger(__name__)
 _INFERENCE_WORKER_SCRIPT = r'''
 import json
 import os
-import re
 import sys
-import time
+import urllib.request
+
+
+OLLAMA_URL = os.environ.get("BEAM_OLLAMA_URL", "http://localhost:11434")
+OLLAMA_MODEL = os.environ.get("BEAM_OLLAMA_MODEL", "qwen3.5:35b-a3b")
 
 
 def _emit(obj):
@@ -47,77 +50,8 @@ def _emit(obj):
     sys.stdout.flush()
 
 
-def _get_embed_weight(model):
-    """Get the embedding weight tensor, handling different model architectures."""
-    for attr in ("model", "transformer"):
-        sub = getattr(model, attr, None)
-        if sub is None:
-            continue
-        for emb_attr in ("embed_tokens", "word_embeddings", "wte"):
-            emb = getattr(sub, emb_attr, None)
-            if emb is not None and hasattr(emb, "weight"):
-                return emb.weight
-    return None
-
-
-def _load_model(model_id, peers):
-    # Load the distributed model and tokenizer; returns (model, tokenizer).
-    #
-    # The client model (AutoDistributedModelForCausalLM) runs the embedding
-    # layer, final ln_f, and LM head on CPU.  The remote transformer blocks
-    # run on the GPU server in float16.
-    #
-    # We explicitly load in float32 because:
-    # 1. float16/bfloat16 LayerNorm is not supported on CPU
-    # 2. bfloat16 LM head on CPU without AVX512 triggers chunked_forward()
-    #    which is ~8-10x slower than plain float32 F.linear().
-    import torch
-    from petals import AutoDistributedModelForCausalLM
-    from transformers import AutoTokenizer
-
-    tokenizer = AutoTokenizer.from_pretrained(model_id, use_fast=False)
-    if tokenizer.pad_token is None and tokenizer.eos_token:
-        tokenizer.pad_token = tokenizer.eos_token
-
-    model = AutoDistributedModelForCausalLM.from_pretrained(
-        model_id,
-        initial_peers=peers,
-        torch_dtype=torch.float32,
-    )
-    model.eval()
-    return model, tokenizer
-
-
 def main():
-    model = None
-    tokenizer = None
-    current_model_id = None
-
-    # initial_peers can be provided via env var (JSON-encoded list).
-    # If not set, petals falls back to PUBLIC_INITIAL_PEERS.
-    _peers_env = os.environ.get("BEAM_INFERENCE_INITIAL_PEERS", "")
-    try:
-        _initial_peers = json.loads(_peers_env) if _peers_env else None
-    except Exception:
-        _initial_peers = None
-
-    # Pre-warm: if BEAM_INFERENCE_WARMUP_MODEL is set, load the model immediately
-    # so the first user request doesn't have to wait for disk I/O.
-    _warmup_model_id = os.environ.get("BEAM_INFERENCE_WARMUP_MODEL", "")
-
     _emit({"type": "ready"})
-
-    if _warmup_model_id:
-        try:
-            from petals.constants import PUBLIC_INITIAL_PEERS
-            peers = _initial_peers if _initial_peers else PUBLIC_INITIAL_PEERS
-            model, tokenizer = _load_model(_warmup_model_id, peers)
-            current_model_id = _warmup_model_id
-            _emit({"type": "warmup_done", "model_id": _warmup_model_id})
-        except Exception as exc:
-            import traceback as _tb
-            _emit({"type": "warmup_error", "model_id": _warmup_model_id,
-                   "message": str(exc), "traceback": _tb.format_exc()})
 
     for raw in sys.stdin:
         raw = raw.strip()
@@ -129,122 +63,52 @@ def main():
             continue
 
         job_id = req.get("job_id", "")
-        model_id = req.get("model_id", "")
         messages = req.get("messages") or []
-        prompt = req.get("prompt", "")
         max_new_tokens = int(req.get("max_new_tokens") or 256)
         temperature = float(req.get("temperature") or 1.0)
-        do_sample = temperature > 0.0
 
         try:
-            if model is None or current_model_id != model_id:
-                from petals.constants import PUBLIC_INITIAL_PEERS
-                peers = _initial_peers if _initial_peers else PUBLIC_INITIAL_PEERS
-                model, tokenizer = _load_model(model_id, peers)
-                current_model_id = model_id
+            payload = json.dumps({
+                "model": OLLAMA_MODEL,
+                "messages": messages,
+                "stream": True,
+                "options": {
+                    "num_predict": max_new_tokens,
+                    "temperature": temperature,
+                },
+            }).encode()
 
-                # Verify client-side weights loaded correctly.
-                _lm_w = model.lm_head.weight
-                _emb_w = _get_embed_weight(model)
-                _emit({"type": "log", "job_id": "",
-                       "message": (
-                           f"Model loaded: lm_head shape={tuple(_lm_w.shape)} "
-                           f"dtype={_lm_w.dtype} norm={_lm_w.norm().item():.4f} "
-                           f"tied={_lm_w is _emb_w}"
-                       )})
-
-            import torch
-
-            # Use chat template when messages are provided.
-            # NOTE: We do NOT pass enable_thinking=False — with Petals
-            # distributed inference it causes empty output. Instead we
-            # strip <think>...</think> blocks post-hoc if present.
-            if messages and hasattr(tokenizer, "apply_chat_template"):
-                encoded = tokenizer.apply_chat_template(
-                    messages,
-                    add_generation_prompt=True,
-                    return_tensors="pt",
-                )
-                if isinstance(encoded, torch.Tensor):
-                    input_ids = encoded
-                else:
-                    input_ids = encoded["input_ids"]
-                attention_mask = torch.ones_like(input_ids)
-            else:
-                encoded = tokenizer(prompt, return_tensors="pt")
-                input_ids = encoded["input_ids"]
-                attention_mask = encoded["attention_mask"]
-
-            # Truncate prompt from the left if it exceeds the server's
-            # max_batch_size limit (8192 tokens per inference step).
-            _max_prompt_tokens = max(1, 8192 - max_new_tokens)
-            if input_ids.shape[1] > _max_prompt_tokens:
-                input_ids = input_ids[:, -_max_prompt_tokens:]
-                attention_mask = attention_mask[:, -_max_prompt_tokens:]
-
-            gen_kwargs = dict(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                max_new_tokens=max_new_tokens,
-                do_sample=do_sample,
-                repetition_penalty=1.3,
+            url = f"{OLLAMA_URL}/api/chat"
+            http_req = urllib.request.Request(
+                url, data=payload,
+                headers={"Content-Type": "application/json"},
             )
-            if do_sample:
-                gen_kwargs["temperature"] = temperature
 
             _emit({"type": "log", "job_id": job_id,
-                   "message": f"Generating: input_len={input_ids.shape[1]} "
-                              f"max_new_tokens={max_new_tokens} temp={temperature}"})
+                   "message": f"Calling Ollama: model={OLLAMA_MODEL} "
+                              f"max_tokens={max_new_tokens} temp={temperature}"})
 
-            # NOTE: Do NOT call model(input_ids=...) directly — use generate().
-            # model.forward() uses rpc_forward which is a different server path.
-            _t0 = time.time()
-            with torch.no_grad():
-                try:
-                    _gen_out = model.generate(
-                        **gen_kwargs,
-                        return_dict_in_generate=True,
-                        output_scores=True,
-                    )
-                    output_ids = _gen_out.sequences
-                except TypeError:
-                    output_ids = model.generate(**gen_kwargs)
-            _elapsed = time.time() - _t0
-            _n_new = output_ids.shape[1] - input_ids.shape[1]
-            _tok_per_sec = _n_new / _elapsed if _elapsed > 0 else 0
-            _emit({"type": "log", "job_id": job_id,
-                   "message": f"Generated {_n_new} tokens in {_elapsed:.1f}s "
-                              f"({_tok_per_sec:.1f} tok/s)"})
+            with urllib.request.urlopen(http_req, timeout=300) as resp:
+                for line in resp:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        chunk = json.loads(line)
+                    except Exception:
+                        continue
 
-            # Decode only the newly generated tokens (skip the prompt).
-            prompt_len = input_ids.shape[-1]
-            new_ids = output_ids[0, prompt_len:]
-            raw_text = tokenizer.decode(new_ids, skip_special_tokens=True)
+                    content = chunk.get("message", {}).get("content", "")
+                    if content:
+                        _emit({"type": "token", "job_id": job_id, "token": content})
 
-            # Strip <think>...</think> reasoning blocks if present
-            # (used by thinking models like Qwen3, etc.).
-            text = re.sub(r"<think>.*?</think>", "", raw_text, flags=re.DOTALL).strip()
-            if "<think>" in text:
-                text = text[:text.index("<think>")].strip()
-
-            if not text and raw_text.strip():
-                _emit({"type": "log", "job_id": job_id,
-                       "message": "Output empty after stripping <think> blocks. "
-                                  "Model may need more max_new_tokens."})
-
-            # Emit one chunk at a time so the frontend streams word-by-word.
-            words = text.split(" ") if text else []
-            for i, word in enumerate(words):
-                chunk = word if i == 0 else " " + word
-                if chunk:
-                    _emit({"type": "token", "job_id": job_id, "token": chunk})
+                    if chunk.get("done"):
+                        break
 
             _emit({"type": "done", "job_id": job_id})
 
         except Exception as exc:
             import traceback as _tb
-            model = None
-            current_model_id = None
             _emit({
                 "type": "error",
                 "job_id": job_id,
@@ -434,12 +298,9 @@ class NodeAgent:
     def __init__(self, config: BeamConfig):
         self.config = config
         self.identity = NodeIdentity(config.agent.state_file)
-        self.petals = PetalsWrapper(
-            port=config.petals.port,
-            public_ip=config.petals.public_ip,
-            gpu_vram_limit=config.petals.gpu_vram_limit,
-            device=config.petals.device,
-            skip_public_ip_detection="onion" in config.agent.transports,
+        self.petals = OllamaWrapper(
+            base_url=config.ollama.base_url,
+            model_tag=config.ollama.model_tag,
         )
         self._gpu_spec = self._resolve_gpu_spec()
         self.session: Optional[aiohttp.ClientSession] = None
@@ -721,12 +582,11 @@ class NodeAgent:
         if name and vram_gb and count:
             return {"name": name, "vram_gb": vram_gb, "count": count}
 
-        python_exec = os.environ.get("BEAM_PETALS_PYTHON") or sys.executable
         try:
-            # Detect GPU using a subprocess to avoid importing torch in this process
+            # Detect GPU using a subprocess (torch optional — may not be installed in Ollama mode).
             script = "import torch; print(f'{torch.cuda.device_count()}|{torch.cuda.get_device_properties(0).name}|{torch.cuda.get_device_properties(0).total_memory}') if torch.cuda.is_available() else print('0||0')"
             result = (
-                subprocess.check_output([python_exec, "-c", script], text=True)
+                subprocess.check_output([sys.executable, "-c", script], text=True)
                 .strip()
                 .split("|")
             )
@@ -1000,53 +860,22 @@ class NodeAgent:
     def _ensure_inference_worker(self) -> _InferenceSubprocess:
         """Return the inference worker, creating it if necessary."""
         if self._inference_worker is None:
-            petals_python = os.environ.get("BEAM_PETALS_PYTHON") or sys.executable
+            python_exec = sys.executable
             script_path = self._get_or_write_worker_script()
 
-            # Build extra env vars for the worker subprocess.
-            extra_env: Dict[str, str] = {}
-
-            # Pass beam DHT initial_peers (from current assignment) so the worker
-            # connects to the beam private swarm rather than the public Petals swarm.
-            assignment_peers = (
-                self.current_assignment.get("initial_peers")
-                if self.current_assignment
-                else None
-            )
-            if assignment_peers:
-                extra_env["BEAM_INFERENCE_INITIAL_PEERS"] = json.dumps(assignment_peers)
-                log.info("Inference worker will use %d beam DHT peer(s)", len(assignment_peers))
-            else:
-                # No beam DHT peers from the control plane — fall back to the
-                # local Petals server's P2P address so the inference worker
-                # connects to its own co-located server instead of the public swarm.
-                local_addrs = self.petals.local_p2p_addrs()
-                if local_addrs:
-                    extra_env["BEAM_INFERENCE_INITIAL_PEERS"] = json.dumps(local_addrs)
-                    log.info(
-                        "No beam DHT peers in assignment — inference worker will use "
-                        "local Petals server P2P addr: %s", local_addrs
-                    )
-                else:
-                    log.info(
-                        "No beam DHT peers in assignment — inference worker will use "
-                        "PUBLIC_INITIAL_PEERS (public Petals swarm)"
-                    )
-
-            # Pre-warm: instruct the worker to load the model immediately at startup
-            # so the first real inference request doesn't have to wait for disk I/O.
-            if self.current_assignment:
-                warmup_model = self.current_assignment.get("model_id", "")
-                if warmup_model:
-                    extra_env["BEAM_INFERENCE_WARMUP_MODEL"] = warmup_model
-                    log.info("Inference worker will pre-load model '%s' at startup.", warmup_model)
+            # Pass Ollama connection details to the worker subprocess.
+            extra_env: Dict[str, str] = {
+                "BEAM_OLLAMA_URL": self.config.ollama.base_url,
+                "BEAM_OLLAMA_MODEL": self.config.ollama.model_tag,
+            }
 
             self._inference_worker = _InferenceSubprocess(
-                petals_python, script_path, extra_env=extra_env
+                python_exec, script_path, extra_env=extra_env
             )
             log.info(
-                "Created inference worker (python=%s, script=%s)",
-                petals_python, script_path,
+                "Created inference worker (python=%s, script=%s, ollama=%s, model=%s)",
+                python_exec, script_path,
+                self.config.ollama.base_url, self.config.ollama.model_tag,
             )
         return self._inference_worker
 
@@ -1178,8 +1007,8 @@ class NodeAgent:
                 "machine_fingerprint": self.identity.machine_fingerprint,
                 "gpu": self._gpu_spec,
                 "software": {
-                    "node_agent_version": "0.1.0",
-                    "petals_version": "2.3.0",
+                    "node_agent_version": "0.1.0-ollama",
+                    "petals_version": "ollama",
                 },
                 "transports": self.config.agent.transports,
                 "capabilities": self._normalized_capabilities(),
@@ -1299,25 +1128,7 @@ class NodeAgent:
             log.error(f"Heartbeat connection error: {e}")
 
     def _detect_model_layers(self, model_id: str) -> Optional[int]:
-        """Try to detect the number of hidden layers in a model via transformers."""
-        try:
-            import subprocess
-            petals_python = os.environ.get("BEAM_PETALS_PYTHON") or sys.executable
-            result = subprocess.run(
-                [
-                    petals_python, "-c",
-                    f"from transformers import AutoConfig; "
-                    f"c = AutoConfig.from_pretrained('{model_id}'); "
-                    f"print(c.num_hidden_layers)",
-                ],
-                capture_output=True, text=True, timeout=60,
-            )
-            if result.returncode == 0:
-                layers = int(result.stdout.strip())
-                log.info("Detected %d layers for model %s", layers, model_id)
-                return layers
-        except Exception as e:
-            log.warning("Failed to detect model layers for %s: %s", model_id, e)
+        """Layer detection not needed for Ollama single-node mode."""
         return None
 
     async def _refresh_assignment(self):
@@ -1430,16 +1241,8 @@ class NodeAgent:
                 try:
                     self.petals.start(new_mid, range_str, initial_peers=new_peers)
                 except Exception as e:
-                    log.error(f"Failed to start Petals for {new_mid} [{range_str}]: {e}")
+                    log.error(f"Failed to start Ollama for {new_mid}: {e}")
                     return
-
-                if self._petals_check_task:
-                    self._petals_check_task.cancel()
-                self._petals_check_task = asyncio.create_task(
-                    self._check_petals_liveness(new_mid, range_str)
-                )
-                # Pre-warm the inference worker once petals is ready.
-                asyncio.create_task(self._prewarm_inference_worker())
             # Stop the inference worker subprocess so it reloads the new model.
             if self._inference_worker is not None:
                 log.info("Assignment changed — stopping inference worker subprocess.")
@@ -1447,46 +1250,17 @@ class NodeAgent:
                 self._inference_worker = None
 
     async def _prewarm_inference_worker(self) -> None:
-        """
-        Wait until the petals server is running, then pre-start the inference worker
-        so that the model is loaded from disk/cache before the first user request arrives.
-        This eliminates the 30-60 second 'cold start' delay users would otherwise experience.
-        """
+        """Pre-start the inference worker so the first request is fast."""
         try:
-            # Poll until petals is running (max 5 minutes).
-            for _ in range(300):
-                if self.petals.is_running():
-                    break
-                await asyncio.sleep(1)
-            else:
-                log.warning("Pre-warm: petals server did not become ready within 5 minutes.")
-                return
-
             if self.config.agent.mock_inference:
                 return
-
-            log.info("Pre-warming inference worker (petals server is ready).")
+            if not self.petals.is_running():
+                return
+            log.info("Pre-warming inference worker.")
             loop = asyncio.get_running_loop()
-            # Run worker creation in a thread so it doesn't block the event loop.
             await loop.run_in_executor(None, self._ensure_inference_worker)
-            log.info("Inference worker pre-warm complete — model is loading in the background.")
+            log.info("Inference worker pre-warm complete.")
         except asyncio.CancelledError:
             return
         except Exception as exc:
             log.warning("Inference worker pre-warm failed: %s", exc)
-
-    async def _check_petals_liveness(self, model_id: str, block_range: str) -> None:
-        try:
-            await asyncio.sleep(60)
-            if (
-                self.current_assignment
-                and self.current_assignment.get("model_id") == model_id
-                and self.petals.is_running() is False
-            ):
-                log.warning(
-                    "Petals did not stay running for 60s (model=%s, blocks=%s)",
-                    model_id,
-                    block_range,
-                )
-        except asyncio.CancelledError:
-            return

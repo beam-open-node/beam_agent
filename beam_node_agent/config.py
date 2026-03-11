@@ -18,6 +18,12 @@ class PetalsConfig(BaseModel):
     device: Optional[str] = Field(default=None, alias="PETALS_DEVICE")  # e.g. "cuda:0"
 
 
+class OllamaConfig(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    base_url: str = Field(default="http://localhost:11434", alias="BEAM_OLLAMA_URL")
+    model_tag: str = Field(default="qwen3.5:35b-a3b", alias="BEAM_OLLAMA_MODEL")
+
+
 class AgentConfig(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
     heartbeat_interval_sec: int = 15
@@ -42,6 +48,7 @@ class AgentConfig(BaseModel):
 class BeamConfig(BaseModel):
     control_plane: ControlPlaneConfig = Field(default_factory=ControlPlaneConfig)
     petals: PetalsConfig = Field(default_factory=PetalsConfig)
+    ollama: OllamaConfig = Field(default_factory=OllamaConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
 
 
@@ -71,6 +78,12 @@ def load_config(config_path: str = "config.yaml") -> BeamConfig:
     if os.environ.get("PETALS_DEVICE", "").strip():
         petals_data["device"] = os.environ["PETALS_DEVICE"]
 
+    ollama_data = config_data.get("ollama", {})
+    if os.environ.get("BEAM_OLLAMA_URL", "").strip():
+        ollama_data["base_url"] = os.environ["BEAM_OLLAMA_URL"]
+    if os.environ.get("BEAM_OLLAMA_MODEL", "").strip():
+        ollama_data["model_tag"] = os.environ["BEAM_OLLAMA_MODEL"]
+
     agent_data = config_data.get("agent", {})
     if "BEAM_PAIRING_TOKEN" in os.environ:
         agent_data["pairing_token"] = os.environ["BEAM_PAIRING_TOKEN"]
@@ -98,6 +111,7 @@ def load_config(config_path: str = "config.yaml") -> BeamConfig:
     config = BeamConfig(
         control_plane=ControlPlaneConfig(**cp_data),
         petals=PetalsConfig(**petals_data),
+        ollama=OllamaConfig(**ollama_data),
         agent=AgentConfig(**agent_data),
     )
 
