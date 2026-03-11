@@ -8,9 +8,31 @@ set -e
 
 CONTROL_PLANE_URL="${BEAM_CONTROL_PLANE_URL:-https://www.openbeam.me}"
 OLLAMA_MODEL="${BEAM_OLLAMA_MODEL:-qwen3.5:35b-a3b}"
-GPU_NAME="${BEAM_GPU_NAME:-NVIDIA GeForce RTX 4090}"
-GPU_VRAM="${BEAM_GPU_VRAM_GB:-24}"
-GPU_COUNT="${BEAM_GPU_COUNT:-1}"
+
+# Auto-detect GPU specs via nvidia-smi if not set by env vars
+if [ -n "$BEAM_GPU_NAME" ]; then
+    GPU_NAME="$BEAM_GPU_NAME"
+elif command -v nvidia-smi &> /dev/null; then
+    GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)
+else
+    GPU_NAME="Unknown GPU"
+fi
+
+if [ -n "$BEAM_GPU_VRAM_GB" ]; then
+    GPU_VRAM="$BEAM_GPU_VRAM_GB"
+elif command -v nvidia-smi &> /dev/null; then
+    GPU_VRAM=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader | head -1 | awk '{printf "%d", $1/1024}')
+else
+    GPU_VRAM="0"
+fi
+
+if [ -n "$BEAM_GPU_COUNT" ]; then
+    GPU_COUNT="$BEAM_GPU_COUNT"
+elif command -v nvidia-smi &> /dev/null; then
+    GPU_COUNT=$(nvidia-smi --query-gpu=name --format=csv,noheader | wc -l)
+else
+    GPU_COUNT="1"
+fi
 BRANCH="feat/ollama-single-node"
 REPO="https://github.com/beam-open-node/beam_agent"
 
