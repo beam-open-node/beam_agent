@@ -113,6 +113,7 @@ agent:
   capabilities:
     supports_heavy_middle_layers: false
     max_concurrent_jobs: 1
+    preferred_model_id: "Qwen/Qwen3.5-35B-A3B-Ollama"
 EOF
 
 # 8. Write start script
