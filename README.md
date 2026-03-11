@@ -22,7 +22,7 @@ Public installer scripts and release binaries for the Beam Node Agent — the pr
 Runs the full model on one machine via Ollama. Requires a GPU with enough VRAM for the model (e.g. RTX 4090 24GB for Qwen3.5-35B-A3B).
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/beam-open-node/beam_agent/feat/ollama-single-node/setup_runpod.sh | bash
+curl -fsSL https://raw.githubusercontent.com/beam-open-node/beam_agent/main/setup_runpod.sh | bash
 ```
 
 This will:
