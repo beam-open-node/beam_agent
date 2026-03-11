@@ -5,10 +5,33 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.request
 from collections import deque
 from typing import List, Optional
 
 log = logging.getLogger(__name__)
+
+_PUBLIC_IP_SERVICES = [
+    "https://api.ipify.org",
+    "https://ifconfig.me/ip",
+    "https://icanhazip.com",
+]
+
+
+def _detect_public_ip(timeout: float = 5.0) -> Optional[str]:
+    """Auto-detect the machine's public IP by querying external services."""
+    for url in _PUBLIC_IP_SERVICES:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "beam-agent/1.0"})
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                ip = resp.read().decode().strip()
+                if ip and re.match(r"^\d{1,3}(\.\d{1,3}){3}$", ip):
+                    log.info("Auto-detected public IP: %s (via %s)", ip, url)
+                    return ip
+        except Exception:
+            continue
+    log.warning("Could not auto-detect public IP from any service")
+    return None
 
 
 class PetalsWrapper:
@@ -22,11 +45,22 @@ class PetalsWrapper:
         public_ip: Optional[str] = None,
         gpu_vram_limit: float = 0.9,
         device: Optional[str] = None,
+        skip_public_ip_detection: bool = False,
     ):
         self.port = port
-        self.public_ip = public_ip
         self.gpu_vram_limit = gpu_vram_limit
         self.device = device  # e.g. "cuda:0", "cuda:1"
+
+        # Auto-detect public IP if not explicitly provided.
+        # Skip for onion-only nodes — external IP lookups would return
+        # a useless Tor exit-node IP (or fail entirely).
+        if public_ip:
+            self.public_ip = public_ip
+        elif skip_public_ip_detection:
+            self.public_ip = None
+            log.info("Skipping public IP auto-detection (onion transport)")
+        else:
+            self.public_ip = _detect_public_ip()
         self.process: Optional[subprocess.Popen] = None
         self._stdout_thread: Optional[threading.Thread] = None
         self._stderr_thread: Optional[threading.Thread] = None
@@ -93,8 +127,12 @@ class PetalsWrapper:
 
         # If the backend provided explicit DHT bootstrap peers, pass them so the
         # petals server joins the beam private swarm instead of the public one.
+        # Also skip the reachability check — it creates a throwaway DHT client
+        # that hard-fails if any bootstrap peer is temporarily unreachable,
+        # and it's not useful for small private swarms anyway.
         if initial_peers:
             cmd.extend(["--initial_peers"] + list(initial_peers))
+            cmd.append("--skip_reachability_check")
 
         # Pin to a specific GPU (e.g. "cuda:1") for multi-GPU machines
         if self.device:
