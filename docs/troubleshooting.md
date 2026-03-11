@@ -1,29 +1,138 @@
 # Troubleshooting
 
-*Last updated: March 1, 2026*
+*Last updated: March 11, 2026*
 
 ---
 
-## Single Node Mode Issues
+## Ollama Not Using the GPU
 
-**Context:** We attempted to run a single `beam-node-agent` on a Runpod instance (RTX 3090, 24GB VRAM) to serve the full `tiiuae/falcon-7b-instruct` model (which consists of 32 blocks) using Petals.
+**Symptoms:** Inference is extremely slow, or `ollama ps` shows the model running on CPU.
 
-**The Issue:** The chat interface on `openbeam.me` would fail to generate complete responses, often hanging at a single black dot. We traced this back to the node only loading 12 out of 32 blocks (`blocks [0, 12]`), rendering it ineligible for a full single-node "fast pool" assignment.
+**Cause:** Ollama cannot detect your NVIDIA GPU. This usually happens because `pciutils` is not installed (common on minimal cloud images like RunPod).
 
-**What We Fixed:**
+**Fix:**
 
-1. **Control Plane Defaults:** The Open WebUI backend originally hardcoded `max_blocks` to 8 for class A models. We updated this in the `beam_scheduler.py` to `32`, `60`, and `80` for classes A, B, and C respectively (deployed to Railway).
-2. **Agent Capabilities:** The `beam-node-agent` codebase defaulted its capability `max_blocks` to `12` in `config.py`. We updated this default to `40`, allowed parsing of a `BEAM_MAX_BLOCKS` environment variable, and released binary version `v0.1.11` via GitHub.
-3. **Installer Hardcoding:** We modified `install.sh` to explicitly add `export BEAM_MAX_BLOCKS=40` when booting in `BEAM_SINGLE_NODE=true` mode.
-4. **Environment Variables:** We correctly exported `BEAM_HOP_COUNTS="A=1,B=1,C=1"` to force the scheduler to assign the entire model to a single hop.
+```bash
+apt-get update && apt-get install -y pciutils
+```
 
-**Remaining Failure / Next Steps:**
+Then reinstall Ollama so it re-detects the GPU:
 
-Despite the above patches to both the control plane (Open WebUI) and the data plane (beam-node-agent), the setup still failed to fully load all 32 blocks or successfully stream chat inferencing.
+```bash
+curl -fsSL https://ollama.com/install.sh | sh
+```
 
-The next person troubleshooting this should investigate:
+Verify GPU detection:
 
-1. **Petals Internal Limits:** Petals might be internally capping blocks based on its own calculation of the node's VRAM constraints (`torch.cuda.get_device_properties`).
-2. **Scheduler Assignment Logic:** The `beam_scheduler.py` logic combining `BEAM_HOP_COUNTS` and `.max_blocks` could still be truncating the assignment before it reaches the Runpod node.
-3. **Agent State Overwrites:** The agent's `state.json` might be keeping an older cached `max_blocks` value that supersedes the new `config.yaml` defaults.
-4. **Control Plane Caching:** Consider if Railway deployment caching or node staleness in Open WebUI is returning a stale node footprint.
+```bash
+ollama ps
+```
+
+The output should show the model loaded on a GPU device. You can also check with `nvidia-smi` that Ollama processes appear in the GPU process list.
+
+---
+
+## Slow Inference
+
+**Symptoms:** Responses take a long time (e.g. 30+ seconds for short replies).
+
+**Possible causes:**
+
+1. **Thinking mode enabled.** Qwen 3.5 supports a "thinking" mode that generates an internal chain-of-thought before responding. If the client or control plane sends requests with thinking enabled, the model produces significantly more tokens (most of which are hidden from the user). This is expected behavior — disable thinking mode on the client side if faster responses are needed.
+
+2. **Model cold start.** The first request after the model is loaded into VRAM takes longer because Ollama must initialize the model weights. Subsequent requests will be faster. If the model was evicted from VRAM (due to inactivity timeout), the next request triggers a reload.
+
+3. **GPU not detected.** See "Ollama Not Using the GPU" above.
+
+---
+
+## Agent Not Starting
+
+**Symptoms:** The agent exits immediately or fails to connect to Ollama.
+
+**Check that the Ollama daemon is running:**
+
+```bash
+systemctl status ollama
+```
+
+If Ollama is not running, start it:
+
+```bash
+systemctl start ollama
+```
+
+Or, if systemd is not available (e.g. inside a container):
+
+```bash
+ollama serve &
+```
+
+Then retry starting the agent:
+
+```bash
+cd beam_agent && bash start_agent.sh
+```
+
+---
+
+## Pairing Issues
+
+**Symptoms:** The 6-digit pair code is displayed, but entering it in the Rent Panel fails or times out.
+
+**Possible causes:**
+
+1. **Network connectivity.** Ensure the machine has outbound internet access to `https://www.openbeam.me`. Test with:
+   ```bash
+   curl -s https://www.openbeam.me/api/v1/health
+   ```
+
+2. **Pairing port conflict.** The agent starts a local HTTP server on one of the configured pairing ports (default: 51337–51340). If all ports are in use, pairing will fail. Check with:
+   ```bash
+   ss -tlnp | grep 5133
+   ```
+
+3. **Code expired.** Pair codes expire after a few minutes. If the code has expired, restart the agent to generate a new one.
+
+4. **Already paired.** If the node was previously paired to a different account, it cannot be re-paired without first being released. Contact the Beam team if you need to transfer a node.
+
+---
+
+## VRAM Reporting
+
+**Symptoms:** The control plane shows incorrect VRAM for your machine.
+
+The agent auto-detects GPU information via `nvidia-smi`. For multi-GPU machines, total VRAM is the sum across all detected GPUs.
+
+To override the reported values, set environment variables:
+
+```bash
+export BEAM_GPU_VRAM_GB=48     # e.g. 2x 24 GB GPUs
+export BEAM_GPU_COUNT=2
+export BEAM_GPU_NAME="RTX 4090"
+```
+
+---
+
+## Model Pull Fails
+
+**Symptoms:** The installer fails during model download with a timeout or disk space error.
+
+1. **Disk space.** The model weights are approximately 16.5 GB. Ensure you have at least 20 GB of free disk space on the volume where Ollama stores models (defaults to `~/.ollama`, or `/workspace/.ollama` on RunPod).
+
+2. **Network timeout.** On slow connections, the download may time out. Retry:
+   ```bash
+   ollama pull qwen3.5:35b-a3b
+   ```
+
+3. **Custom storage path.** If your root filesystem is small, set `OLLAMA_MODELS` to a path on a larger volume before pulling:
+   ```bash
+   export OLLAMA_MODELS=/workspace/.ollama/models
+   ollama pull qwen3.5:35b-a3b
+   ```
+
+---
+
+## Still Stuck?
+
+Contact the Beam team or check the project repository for the latest updates.

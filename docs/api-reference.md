@@ -1,12 +1,12 @@
 # API Reference
 
-*Last updated: March 1, 2026*
+*Last updated: March 11, 2026*
 
 ---
 
 ## Overview
 
-The Beam Gateway API provides an **OpenAI-compatible** interface for submitting inference requests to the decentralized network. All API endpoints use JSON for request and response bodies.
+The Beam Gateway API provides an **OpenAI-compatible** interface for submitting inference requests to the network. All API endpoints use JSON for request and response bodies.
 
 **Base URL**: `https://www.openbeam.me/api/v1`
 
@@ -34,7 +34,7 @@ Submit a chat-style inference request.
 
 ```json
 {
-  "model": "tiiuae/falcon-7b-instruct",
+  "model": "Qwen/Qwen3.5-35B-A3B-Ollama",
   "messages": [
     { "role": "system", "content": "You are a helpful assistant." },
     { "role": "user", "content": "Explain quantum computing." }
@@ -49,7 +49,7 @@ Submit a chat-style inference request.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `model` | string | Yes | Model identifier (e.g. `tiiuae/falcon-7b-instruct`) |
+| `model` | string | Yes | Model identifier (e.g. `Qwen/Qwen3.5-35B-A3B-Ollama`) |
 | `messages` | array | Yes | Array of message objects with `role` and `content` |
 | `max_tokens` | int | No | Maximum tokens to generate (default: 256) |
 | `temperature` | float | No | Sampling temperature 0.0–2.0 (default: 1.0) |
@@ -62,7 +62,7 @@ Submit a chat-style inference request.
   "id": "chat-abc123",
   "object": "chat.completion",
   "created": 1709251200,
-  "model": "tiiuae/falcon-7b-instruct",
+  "model": "Qwen/Qwen3.5-35B-A3B-Ollama",
   "choices": [
     {
       "index": 0,
@@ -80,26 +80,6 @@ Submit a chat-style inference request.
   }
 }
 ```
-
----
-
-## Transport Modes
-
-You can specify a transport mode for privacy-aware routing:
-
-```json
-{
-  "model": "tiiuae/falcon-7b-instruct",
-  "messages": [...],
-  "transport": "onion"
-}
-```
-
-| Mode | Description | Latency Impact |
-|---|---|---|
-| `fast` | Direct TCP + TLS (default) | Lowest |
-| `secure` | TLS with pinned certificates | Medium |
-| `onion` | Tor .onion routing only | Higher |
 
 ---
 
@@ -123,13 +103,12 @@ Register a new GPU node with the network.
     "count": 1
   },
   "software": {
-    "node_agent_version": "0.1.0",
-    "petals_version": "2.3.0"
+    "node_agent_version": "0.2.0",
+    "ollama_version": "0.9.0"
   },
-  "transports": ["fast"],
   "capabilities": {
-    "supports_heavy_middle_layers": true,
-    "max_concurrent_jobs": 1
+    "max_concurrent_jobs": 1,
+    "max_model_class": "S"
   }
 }
 ```
@@ -142,8 +121,8 @@ Register a new GPU node with the network.
   "node_id": "uuid",
   "node_secret": "base64_string",
   "assignment": {
-    "model_id": "tiiuae/falcon-7b-instruct",
-    "block_range": [0, 16]
+    "model_id": "Qwen/Qwen3.5-35B-A3B-Ollama",
+    "model_tag": "qwen3.5:35b-a3b"
   },
   "heartbeat_interval_sec": 15
 }
@@ -193,9 +172,8 @@ signature = HMAC_SHA256(node_secret, canonical_string)
   },
   "active_jobs": [],
   "current_assignment": {
-    "model_id": "tiiuae/falcon-7b-instruct",
-    "block_range": [0, 16],
-    "assignment_epoch": 42
+    "model_id": "Qwen/Qwen3.5-35B-A3B-Ollama",
+    "model_tag": "qwen3.5:35b-a3b"
   }
 }
 ```
@@ -215,11 +193,10 @@ signature = HMAC_SHA256(node_secret, canonical_string)
 ```json
 {
   "protocol_version": "1.0",
-  "model_id": "tiiuae/falcon-7b-instruct",
-  "block_range": [0, 16],
+  "model_id": "Qwen/Qwen3.5-35B-A3B-Ollama",
+  "model_tag": "qwen3.5:35b-a3b",
   "assignment_epoch": 42,
-  "effective_at": 1709251200,
-  "initial_peers": ["/ip4/..."]
+  "effective_at": 1709251200
 }
 ```
 
@@ -259,7 +236,7 @@ All error responses follow this format:
 | `UNSUPPORTED_VERSION` | 400 | Protocol version is not supported |
 | `NODE_FINGERPRINT_MISMATCH` | 409 | Machine fingerprint does not match the registered node |
 | `RATE_LIMIT_EXCEEDED` | 429 | Too many requests from this node/user |
-| `NO_CAPACITY` | 503 | Scheduler cannot find a valid chain for the request |
+| `NO_CAPACITY` | 503 | No nodes are available to serve the requested model |
 | `JOB_NOT_FOUND` | 404 | Job ID referenced does not exist |
 | `PAIRING_TOKEN_INVALID` | 400 | Pairing token is invalid or already used |
 | `PAIRING_TOKEN_EXPIRED` | 400 | Pairing token has expired |
@@ -277,11 +254,12 @@ All error responses follow this format:
 
 ## Model Classes
 
-| Class | Model Size | Example |
-|---|---|---|
-| A (Light) | 7–8B parameters | `tiiuae/falcon-7b-instruct` |
-| B (Large) | 13–30B parameters | — |
-| C (Heavy) | 30–100B+ parameters | Kimi-class models |
+| Class | Description | Status | Example |
+|---|---|---|---|
+| S (Single-node) | Full model served via Ollama on one machine | **Active** | Qwen 3.5 35B-A3B |
+| A (Light) | 7-8B parameters, single-node or short chain | Reserved / Future | — |
+| B (Large) | 13-30B parameters, multi-node chain | Reserved / Future | — |
+| C (Heavy) | 30-100B+ parameters, distributed inference | Reserved / Future | DeepSeek V3, large MoE |
 
 ---
 

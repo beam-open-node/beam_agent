@@ -1,25 +1,27 @@
 # Beam Whitepaper
 
-*Last updated: March 1, 2026*
+*Last updated: March 11, 2026*
 
 ---
 
 ## Decentralized Intelligence — A Censorship-Resistant Inference Network
 
-**Petals-first · Heavy-model-capable · Onion-routable**
+**Ollama-powered · MoE-optimized · Progressively decentralized**
 
 ---
 
 ## Abstract
 
-Beam is a decentralized inference fabric that uses Petals-style multi-host execution to run AI models too large for single machines. The network is backed by a hybrid of community GPUs and backbone infrastructure, with optional Tor/onion routing and progressive tokenized incentives.
+Beam is a decentralized inference network that connects GPU providers to users who need access to open-weight AI models. In its initial version (v0), each node runs the full model locally via Ollama on dedicated GPU hardware. The network is coordinated by a central control plane that handles node registration, model assignment, and request routing.
 
-**This is not a general-purpose "cheap ChatGPT."** Beam is purpose-built for:
+Future versions will introduce distributed multi-node inference for models too large to fit on a single machine.
 
-- Ultra-large open models (Kimi-class, 30B–100B+)
-- Censorship-resistant access
-- User-contributed GPU compute
-- Programmable, transport-aware inference routing
+**Beam is purpose-built for:**
+
+- Open-weight models served on community-contributed GPUs
+- Censorship-resistant access to AI inference
+- Efficient MoE (Mixture-of-Experts) models that maximize capability per VRAM dollar
+- Progressive decentralization with tokenized incentives
 
 ---
 
@@ -28,77 +30,104 @@ Beam is a decentralized inference fabric that uses Petals-style multi-host execu
 ### Components
 
 - **Gateway API**: OpenAI-compatible user entrypoint
-- **Scheduler / Router**: Chain construction and failover decisions
+- **Scheduler / Router**: Node selection and request routing
 - **Control Plane**: Node registry, health index, assignment engine, accounting
-- **Node Agent**: Provider-side daemon handling registration, heartbeat, and assignment
-- **Petals Server**: Block-serving runtime for distributed transformer inference
+- **Node Agent**: Provider-side daemon handling registration, heartbeat, and inference
+- **Ollama Runtime**: Local model serving engine with GPU acceleration
 
-### System Flow
+### System Flow (v0 — Single-Node)
 
 ```
 User / Developer
-      ↓
-  Gateway API (OpenAI-compatible, transport-aware)
-      ↓
+      |
+  Gateway API (OpenAI-compatible)
+      |
   Scheduler / Router
-      ↓
-  Petals Client
-      ↓
-  Petals Swarm (Backbone + Community Nodes)
+      |
+  Node Agent (selected node)
+      |
+  Ollama (local GPU inference)
 ```
+
+Each inference request is routed to a single node that runs the full model. There is no block splitting or multi-node coordination in v0.
+
+### System Flow (v1+ — Distributed, Future)
+
+```
+User / Developer
+      |
+  Gateway API
+      |
+  Scheduler / Router
+      |
+  Distributed Inference Chain (multiple nodes)
+```
+
+For models too large to fit on a single machine, v1 will introduce multi-node inference where the model's layers are distributed across a chain of GPU nodes.
 
 ---
 
 ## 2. Model Classes
 
-### Class A — Light (7–8B)
-- Short inference chains
-- Opportunistic routing allowed
-- Suitable for single-node deployment
+### Class S — Single-Node (Current)
 
-### Class B — Large (13–30B)
+- Full model runs on one machine via Ollama
+- Suited for efficient MoE architectures (e.g. Qwen 3.5 35B-A3B: 35B total params, ~3B active)
+- Requires a GPU with sufficient VRAM (e.g. 24 GB for current models)
+- No multi-node coordination overhead
+
+**Active models:**
+
+| Model | Total Params | Active Params | Min VRAM |
+|---|---|---|---|
+| Qwen 3.5 35B-A3B | 35 B (MoE) | ~3 B | 24 GB |
+
+**Coming soon:** Kimi K2.5, GLM-5 (reserved, not yet available).
+
+### Class A — Light (Future)
+
+- 7-8B parameter models
+- Single-node deployment
+- Low VRAM requirements
+
+### Class B — Large (Future)
+
+- 13-30B parameter models
+- May require multi-node inference chains
 - Backbone-preferred routing
-- Limited churn tolerance
-- Multi-hop inference chains
 
-### Class C — Heavy / Ultra (30–100B+)
-- Mandatory backbone anchoring
-- Early and final layers must use backbone nodes
-- Node uptime requirement: ≥98% (rolling 24h)
-- No hot block reassignment
+### Class C — Heavy / Ultra (Future)
+
+- 30-100B+ parameter models (e.g. DeepSeek V3, large MoE)
+- Mandatory distributed inference across multiple nodes
+- Backbone node anchoring for reliability
+- Node uptime requirement: >=98% (rolling 24h)
 
 ---
 
 ## 3. Node Hardware Tiers
 
-| Tier | VRAM | Heavy Model Eligibility |
+| Tier | VRAM | Eligible Classes |
 |---|---|---|
-| T1 | 6–8 GB | No |
-| T2 | 10–12 GB | No |
-| T3 | 16–24+ GB | Yes (middle layers only) |
+| T1 | 6-8 GB | Future lightweight models only |
+| T2 | 10-16 GB | Class A (future) |
+| T3 | 24+ GB | Class S (current), Class B/C (future) |
 
-Backbone nodes may exceed T3 specifications.
+Multi-GPU machines are supported. Ollama automatically utilizes all available GPUs for inference, and total VRAM is summed across devices.
 
 ---
 
-## 4. Transport & Privacy
+## 4. Privacy & Future Transport
 
-### Transport Modes
+In v0, all traffic between users, the gateway, and nodes travels over standard HTTPS.
+
+Future versions may introduce additional transport options:
 
 | Mode | Transport | Intended Use | Latency |
 |---|---|---|---|
-| Fast | Direct TCP + TLS | Default usage | Lowest |
+| Standard | HTTPS | Default usage (v0) | Lowest |
 | Secure | TLS + pinned certs | Privacy-aware users | Medium |
 | Onion | Tor (.onion) only | Censorship-resistant | Higher |
-
-### Onion Routing Rules
-
-- Onion nodes expose only `.onion` services
-- Onion requests route exclusively through onion-capable nodes
-- Separate scoring pools for onion vs clearnet
-- At least one onion backbone node per heavy model
-
-**Important:** Tor hides *who* you are, not *what* you send.
 
 ---
 
@@ -116,13 +145,13 @@ All node communications are authenticated via HMAC-SHA256 signatures. Each regis
 ### Node Lifecycle
 
 ```
-joining → running → degraded → draining → offline
+joining -> running -> degraded -> draining -> offline
 ```
 
 ### Job Lifecycle
 
 ```
-accepted → chained → running → completed | failed | expired
+accepted -> routed -> running -> completed | failed | expired
 ```
 
 ---
@@ -139,25 +168,24 @@ accepted → chained → running → completed | failed | expired
 ### Inference Pricing
 
 ```
-inference_cost = base_model_cost × chain_length × transport_factor × priority
+inference_cost = base_model_cost * token_count * priority
 ```
 
 | Class | Relative Cost |
 |---|---|
-| A (7–8B) | 1× |
-| B (13–30B) | 2.5× |
-| C (Kimi-class) | 6–10× |
+| S (MoE, current) | 1x |
+| A (7-8B, future) | 1x |
+| B (13-30B, future) | 2.5x |
+| C (30-100B+, future) | 6-10x |
 
 ### Node Rewards
 
 ```
-reward = base_rate × uptime_factor × block_weight × transport_bonus × reliability_factor
+reward = base_rate * uptime_factor * reliability_factor
 ```
 
-- Uptime factor ∈ [0, 1]
-- Block weight: higher for early/final layers
-- Transport bonus: >1 for secure/onion nodes
-- Reliability factor: penalizes failures
+- Uptime factor: proportion of time the node is online and responsive [0, 1]
+- Reliability factor: penalizes inference failures and timeouts
 
 ### Anti-Ponzi Guarantees
 
@@ -175,13 +203,12 @@ reward = base_rate × uptime_factor × block_weight × transport_bonus × reliab
 
 - Nodes can see prompts in v0
 - Nodes can log data
-- Tor mitigates metadata leakage, not content exposure
+- The control plane is centralized in v0
 
 ### v0 Controls
 
 - HMAC-signed heartbeats
 - Canary inference checks
-- Transport-segmented routing
 - Rate limits and anomaly detection
 
 ### Threat Categories
@@ -189,9 +216,8 @@ reward = base_rate × uptime_factor × block_weight × transport_bonus × reliab
 | Threat | Mitigation |
 |---|---|
 | Malicious nodes returning bad outputs | Canary checks, redundant routing, reward decay, bans |
-| Prompt logging by nodes | Clear disclosure, onion routing for metadata |
+| Prompt logging by nodes | Clear disclosure; future: encrypted inference |
 | Sybil attacks | Hardware benchmarks, VRAM thresholds, admission controls |
-| Traffic correlation on Tor | Onion-only pools, no clearnet fallback |
 | Gateway API abuse | Rate limiting, token pricing, anomaly detection |
 
 ### Explicit Non-Guarantees
@@ -209,7 +235,7 @@ The system does **not** guarantee:
 ### What It Proves
 
 - Node participated in inference
-- Duration and block range served
+- Duration and tokens served
 
 ### What It Does NOT Prove
 
@@ -220,8 +246,7 @@ The system does **not** guarantee:
 
 A node is reward-eligible when:
 - Job ID exists and signature is valid
-- Node appears in the assigned chain for that job
-- Reported assignment overlaps expected block range
+- Node is the assigned node for that job
 - Heartbeat freshness is within tolerance
 - No disqualifying error flags
 
@@ -231,18 +256,19 @@ A node is reward-eligible when:
 
 | Milestone | Description |
 |---|---|
-| M0 | Local Petals swarm |
-| M1 | Node app + registry |
-| M2 | Gateway operational |
-| M3 | Heavy model stabilized |
-| M4 | Onion routing live |
+| M0 | Single-node Ollama inference (Class S) — **current** |
+| M1 | Node agent + registry + pairing |
+| M2 | Gateway API operational with Qwen 3.5 35B-A3B |
+| M3 | Additional MoE models (Kimi K2.5, GLM-5) |
+| M4 | Distributed multi-node inference (Class B/C) |
 | M5 | Off-chain token ledger |
 | M6 | On-chain settlement (optional) |
+| M7 | Transport privacy options (secure, onion) |
 
 ---
 
 ## 10. Summary
 
-> Beam is a censorship-resistant inference network for models that cannot run on single machines, built on Petals, stabilized by backbone nodes, and progressively decentralized via tokenized incentives.
+> Beam is a decentralized inference network that connects GPU providers to users who need access to open-weight AI models. In v0, each node runs the full model locally via Ollama, optimized for efficient MoE architectures. Future versions will expand to distributed multi-node inference for ultra-large models, with progressive decentralization via tokenized incentives.
 
 Users pay in stable internal credits. Nodes earn crypto tokens for work. Platform revenue comes from credit sales, fees, and treasury tokens. Value and rewards are tied to actual usage, not speculation.
