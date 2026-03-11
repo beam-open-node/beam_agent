@@ -79,10 +79,18 @@ def _patch_snapshot_download():
     except (ImportError, AttributeError):
         return  # nothing to patch
 
-    # Regex matching transformer-block weight names that live on remote
-    # servers.  Must stay in sync with the Petals
-    # _keys_to_ignore_on_load_unexpected pattern.
-    _BLOCK_KEY_RE = _re.compile(r"^model\.layers\.")
+    def _detect_block_prefix(weight_map):
+        """Auto-detect the transformer block key prefix from the weight map.
+        Handles both standard models (model.layers.) and composite models
+        (model.language_model.layers.) like Qwen3.5 MoE."""
+        # Look for numbered layer patterns like *.layers.0.*, *.layers.1.*, etc.
+        layer_re = _re.compile(r'^(.+\.layers)\.\d+\.')
+        prefixes = set()
+        for key in weight_map:
+            m = layer_re.match(key)
+            if m:
+                prefixes.add(m.group(1))
+        return prefixes
 
     def _patched_snapshot(repo_id, *args, **kwargs):
         # Only intervene when the caller hasn't already set allow/ignore.
@@ -96,10 +104,23 @@ def _patch_snapshot_download():
                 )
                 with open(idx_path) as _f:
                     weight_map = json.load(_f).get("weight_map", {})
-                needed_shards = {
-                    fname for key, fname in weight_map.items()
-                    if not _BLOCK_KEY_RE.search(key)
-                }
+
+                # Auto-detect the block prefix(es) from actual weight keys
+                block_prefixes = _detect_block_prefix(weight_map)
+                if block_prefixes:
+                    # Build regex that matches any detected block prefix
+                    block_patterns = [
+                        _re.compile(f"^{_re.escape(p)}\\.\\d+\\.")
+                        for p in block_prefixes
+                    ]
+                    needed_shards = {
+                        fname for key, fname in weight_map.items()
+                        if not any(bp.search(key) for bp in block_patterns)
+                    }
+                else:
+                    # No layer keys found — download everything
+                    needed_shards = set(weight_map.values())
+
                 # Allow the needed shards plus all small non-safetensor files
                 # (config, tokenizer, index, etc.)
                 allow = [
@@ -109,7 +130,8 @@ def _patch_snapshot_download():
                 kwargs["allow_patterns"] = allow
                 _emit({"type": "log", "job_id": "",
                        "message": f"Selective download: {len(needed_shards)} "
-                                  f"shard(s) of {len(set(weight_map.values()))}"})
+                                  f"shard(s) of {len(set(weight_map.values()))} "
+                                  f"(block prefixes: {block_prefixes})"})
             except Exception as exc:
                 # Fall back to default (download everything) on any error.
                 _emit({"type": "log", "job_id": "",
