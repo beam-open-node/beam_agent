@@ -60,6 +60,72 @@ def _get_embed_weight(model):
     return None
 
 
+def _patch_snapshot_download():
+    """Prevent huggingface_hub.snapshot_download from fetching all safetensor
+    shards.  The Petals distributed client only needs embedding / LM-head
+    weights — the transformer-block shards live on remote servers.
+
+    Newer huggingface_hub calls snapshot_download *before* the Petals
+    patched_get_checkpoint_shard_files() filter runs, so the full model
+    gets downloaded to disk even though only 1-2 shards are needed.
+
+    We fix this by reading the safetensors index, figuring out which shards
+    contain non-layer weights, and passing ``allow_patterns`` so only those
+    shards (plus small metadata files) are fetched."""
+    import re as _re
+    try:
+        import huggingface_hub as _hfh
+        _original_snapshot = _hfh.snapshot_download
+    except (ImportError, AttributeError):
+        return  # nothing to patch
+
+    # Regex matching transformer-block weight names that live on remote
+    # servers.  Must stay in sync with the Petals
+    # _keys_to_ignore_on_load_unexpected pattern.
+    _BLOCK_KEY_RE = _re.compile(r"^model\.layers\.")
+
+    def _patched_snapshot(repo_id, *args, **kwargs):
+        # Only intervene when the caller hasn't already set allow/ignore.
+        if "allow_patterns" not in kwargs and "ignore_patterns" not in kwargs:
+            try:
+                idx_path = _hfh.hf_hub_download(
+                    repo_id, "model.safetensors.index.json",
+                    repo_type=kwargs.get("repo_type"),
+                    revision=kwargs.get("revision"),
+                    token=kwargs.get("token"),
+                )
+                with open(idx_path) as _f:
+                    weight_map = json.load(_f).get("weight_map", {})
+                needed_shards = {
+                    fname for key, fname in weight_map.items()
+                    if not _BLOCK_KEY_RE.search(key)
+                }
+                # Allow the needed shards plus all small non-safetensor files
+                # (config, tokenizer, index, etc.)
+                allow = [
+                    "*.json", "*.txt", "*.model", "*.tiktoken",
+                    "*.jinja", "*.py",
+                ] + list(needed_shards)
+                kwargs["allow_patterns"] = allow
+                _emit({"type": "log", "job_id": "",
+                       "message": f"Selective download: {len(needed_shards)} "
+                                  f"shard(s) of {len(set(weight_map.values()))}"})
+            except Exception as exc:
+                # Fall back to default (download everything) on any error.
+                _emit({"type": "log", "job_id": "",
+                       "message": f"Selective download failed, falling back: {exc}"})
+        return _original_snapshot(repo_id, *args, **kwargs)
+
+    _hfh.snapshot_download = _patched_snapshot
+    # Also patch the module-level reference used by transformers internals
+    try:
+        from transformers.utils import hub as _thub
+        if hasattr(_thub, "snapshot_download"):
+            _thub.snapshot_download = _patched_snapshot
+    except (ImportError, AttributeError):
+        pass
+
+
 def _load_model(model_id, peers):
     # Load the distributed model and tokenizer; returns (model, tokenizer).
     #
@@ -89,6 +155,10 @@ def _load_model(model_id, peers):
 
 
 def main():
+    # Patch snapshot_download before any model loading to prevent
+    # downloading all safetensor shards (only need embedding + LM head).
+    _patch_snapshot_download()
+
     model = None
     tokenizer = None
     current_model_id = None
