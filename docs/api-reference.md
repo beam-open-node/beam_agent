@@ -108,7 +108,7 @@ Register a new GPU node with the network.
   },
   "capabilities": {
     "max_concurrent_jobs": 1,
-    "max_model_class": "S"
+    "max_model_class": "A"
   }
 }
 ```
