@@ -821,6 +821,7 @@ class NodeAgent:
         max_tokens = self._coerce_int(payload.get("max_tokens"))
         temperature = self._coerce_float(payload.get("temperature"))
         think = bool(payload.get("think", False))
+        e2e_encryption = bool(payload.get("e2e_encryption", False))
 
         # Community models (tag contains "/") don't support native think mode.
         # Reject with a user-visible error instead of silently failing.
@@ -920,8 +921,8 @@ class NodeAgent:
             for m in (messages or [])
         )
         log.info(
-            "Starting inference: job_id=%s model_id=%s transport=%s n_messages=%d messages=[%s]",
-            job_id, model_id, transport, len(messages or []), _msg_summary,
+            "Starting inference: job_id=%s model_id=%s transport=%s e2e=%s n_messages=%d messages=[%s]",
+            job_id, model_id, transport, e2e_encryption, len(messages or []), _msg_summary,
         )
         async with self._inference_lock:
             try:
