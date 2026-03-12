@@ -701,9 +701,8 @@ class NodeAgent:
                 self.config.agent.transports.append("onion")
             log.info("Tor enabled — onion address: %s", onion)
         except TorStartupError as exc:
-            log.error("Tor failed to start: %s", exc)
+            log.warning("Tor failed to start: %s — continuing without onion transport", exc)
             self._tor_manager = None
-            raise
 
     async def _start_tor_ws(self) -> None:
         """Start a second WebSocket connection routed through Tor SOCKS5."""
