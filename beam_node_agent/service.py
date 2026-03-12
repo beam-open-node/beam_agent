@@ -70,16 +70,22 @@ def main():
 
         try:
             think = req.get("think", False)
-            payload = json.dumps({
+            # Community GGUF models (e.g. alibayram/mimo) don't support the
+            # think parameter — Ollama returns 400.  Only pass think for
+            # official library models (no "/" in the tag).
+            model_supports_think = "/" not in OLLAMA_MODEL
+            ollama_body = {
                 "model": OLLAMA_MODEL,
                 "messages": messages,
                 "stream": True,
-                "think": think,
                 "options": {
                     "num_predict": max_new_tokens,
                     "temperature": temperature,
                 },
-            }).encode()
+            }
+            if model_supports_think:
+                ollama_body["think"] = think
+            payload = json.dumps(ollama_body).encode()
 
             url = f"{OLLAMA_URL}/api/chat"
             http_req = urllib.request.Request(
@@ -90,6 +96,12 @@ def main():
             _emit({"type": "log", "job_id": job_id,
                    "message": f"Calling Ollama: model={OLLAMA_MODEL} "
                               f"max_tokens={max_new_tokens} temp={temperature} think={think}"})
+
+            # For community models without native think support, the model
+            # embeds <think>...</think> tags in the content stream.  We parse
+            # these out manually so the UI only sees the final answer.
+            in_think_block = False
+            think_buf = ""
 
             with urllib.request.urlopen(http_req, timeout=300) as resp:
                 for line in resp:
@@ -102,12 +114,41 @@ def main():
                         continue
 
                     msg_obj = chunk.get("message", {})
+                    # Native think support (official models)
                     thinking = msg_obj.get("thinking", "")
                     if thinking:
                         _emit({"type": "thinking", "job_id": job_id, "token": thinking})
                     content = msg_obj.get("content", "")
                     if content:
-                        _emit({"type": "token", "job_id": job_id, "token": content})
+                        if not model_supports_think:
+                            # Parse <think> tags from raw content stream
+                            think_buf += content
+                            while think_buf:
+                                if in_think_block:
+                                    end = think_buf.find("</think>")
+                                    if end == -1:
+                                        # Still inside think block, buffer it
+                                        _emit({"type": "thinking", "job_id": job_id, "token": think_buf})
+                                        think_buf = ""
+                                    else:
+                                        # Emit thinking up to tag, then switch
+                                        _emit({"type": "thinking", "job_id": job_id, "token": think_buf[:end]})
+                                        think_buf = think_buf[end + len("</think>"):]
+                                        in_think_block = False
+                                else:
+                                    start = think_buf.find("<think>")
+                                    if start == -1:
+                                        # Normal content
+                                        _emit({"type": "token", "job_id": job_id, "token": think_buf})
+                                        think_buf = ""
+                                    else:
+                                        # Emit content before tag, then switch
+                                        if start > 0:
+                                            _emit({"type": "token", "job_id": job_id, "token": think_buf[:start]})
+                                        think_buf = think_buf[start + len("<think>"):]
+                                        in_think_block = True
+                        else:
+                            _emit({"type": "token", "job_id": job_id, "token": content})
 
                     if chunk.get("done"):
                         break
@@ -780,6 +821,20 @@ class NodeAgent:
         max_tokens = self._coerce_int(payload.get("max_tokens"))
         temperature = self._coerce_float(payload.get("temperature"))
         think = bool(payload.get("think", False))
+
+        # Community models (tag contains "/") don't support native think mode.
+        # Reject with a user-visible error instead of silently failing.
+        model_supports_think = "/" not in self.config.ollama.model_tag
+        if think and not model_supports_think:
+            await self._send_ws(
+                ws,
+                {
+                    "type": "error",
+                    "job_id": job_id or "unknown",
+                    "message": "Think mode is not available for this model.",
+                },
+            )
+            return
 
         if not job_id or not model_id:
             await self._send_ws(
