@@ -53,8 +53,8 @@ agent:
     - 51340
   capabilities:
     max_concurrent_jobs: 1
-    max_model_class: "A"
-    # preferred_model_id: "Qwen/Qwen3.5-35B-A3B-Ollama"
+    max_model_class: "B"
+    preferred_model_id: "Qwen/Qwen3.5-35B-A3B-Ollama"
 ```
 
 ---

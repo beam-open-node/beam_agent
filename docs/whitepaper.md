@@ -53,27 +53,33 @@ Each inference request is routed to a single node that runs the full model. The 
 
 ## 2. Model Classes
 
-### Class A — Current
+### Class A — Lightweight
 
-- Full model runs on one machine via Ollama
-- Suited for efficient MoE architectures (e.g. Qwen 3.5 35B-A3B: 35B total params, ~3B active)
-- Requires a GPU with sufficient VRAM (e.g. 24 GB for current models)
-- No multi-node coordination overhead
+- Smaller models optimized for speed, reasoning, math, and code
+- Low VRAM requirements, runs on a single GPU via Ollama
 
 | Model | Total Params | Active Params | Min VRAM | Status |
 |---|---|---|---|---|
-| Qwen 3.5 35B-A3B | 35 B (MoE) | ~3 B | 24 GB | **Active** |
+| MiMo-7B-RL | 7 B | 7 B | ~5 GB | **Active** |
 
-### Class B — Coming Soon
+### Class B — Primary
 
-- Larger models requiring more VRAM or multi-GPU setups
-- Single-node deployment via Ollama
+- Full model runs on one machine via Ollama
+- Suited for efficient MoE architectures (e.g. Qwen 3.5 35B-A3B: 35B total params, ~3B active)
+- Requires a GPU with sufficient VRAM (e.g. 24 GB)
+
+| Model | Total Params | Active Params | Min VRAM | Status |
+|---|---|---|---|---|
+| Qwen 3.5 35B-A3B | 35 B (MoE) | ~3 B | 20 GB | **Active** |
+
+### Class C — Upcoming
+
+- Larger models, potentially requiring multi-node coordination
 
 | Model | Description | Status |
 |---|---|---|
 | Kimi K2.5 | Moonshot AI reasoning model | Coming soon |
 | GLM-5 | Zhipu AI general-purpose model | Coming soon |
-| DeepSeek V3 | DeepSeek MoE model | Coming soon |
 
 ---
 
@@ -226,7 +232,7 @@ A node is reward-eligible when:
 
 | Milestone | Description |
 |---|---|
-| M0 | Single-node Ollama inference (Class A) — **current** |
+| M0 | Single-node Ollama inference (Class A + B) — **current** |
 | M1 | Node agent + registry + pairing |
 | M2 | Gateway API operational with Qwen 3.5 35B-A3B |
 | M3 | Additional MoE models (Kimi K2.5, GLM-5) |

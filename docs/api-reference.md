@@ -108,7 +108,7 @@ Register a new GPU node with the network.
   },
   "capabilities": {
     "max_concurrent_jobs": 1,
-    "max_model_class": "A"
+    "max_model_class": "B"
   }
 }
 ```
@@ -256,11 +256,9 @@ All error responses follow this format:
 
 | Class | Description | Status | Example |
 |---|---|---|---|
-| S (Single-node) | Full model served via Ollama on one machine | **Active** | Qwen 3.5 35B-A3B |
-| P (Compact) | Lightweight model served via Ollama on one machine | **Active** | MiMo-7B-RL |
-| A (Light) | 7-8B parameters, single-node or short chain | Reserved / Future | — |
-| B (Large) | 13-30B parameters, multi-node chain | Reserved / Future | — |
-| C (Heavy) | 30-100B+ parameters, distributed inference | Reserved / Future | DeepSeek V3, large MoE |
+| A | Lightweight model served via Ollama on one machine | **Active** | MiMo-7B-RL |
+| B | Primary model served via Ollama on one machine | **Active** | Qwen 3.5 35B-A3B |
+| C | Upcoming / larger models | Reserved / Future | Kimi K2.5, GLM-5 |
 
 ---
 

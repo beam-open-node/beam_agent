@@ -113,7 +113,7 @@ agent:
   capabilities:
     supports_heavy_middle_layers: false
     max_concurrent_jobs: 1
-    max_model_class: "P"
+    max_model_class: "A"
     preferred_model_id: "Xiaomi/MiMo-7B-RL-Ollama"
 EOF
 

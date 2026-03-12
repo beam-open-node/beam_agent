@@ -40,7 +40,7 @@ agent:
   mock_inference: false      # Set true for testing without GPU
   capabilities:
     max_concurrent_jobs: 1
-    max_model_class: "A"
+    max_model_class: "B"
     preferred_model_id: null  # null = accept any assigned model
 ```
 
@@ -78,5 +78,5 @@ agent:
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `max_concurrent_jobs` | int | `1` | Maximum inference jobs this node handles simultaneously |
-| `max_model_class` | string | `"A"` | Maximum model class to accept: `A` (current), `B` (coming soon) |
+| `max_model_class` | string | `"B"` | Model class: `A` (MiMo-7B-RL), `B` (Qwen 3.5 35B-A3B), `C` (upcoming) |
 | `preferred_model_id` | string | `null` | Preferred model identifier. `null` = accept any assigned model |
