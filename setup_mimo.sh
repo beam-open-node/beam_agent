@@ -2,12 +2,12 @@
 set -e
 
 # -----------------------------------------------------------------------
-# Beam Node Agent - RunPod Setup Script for Phi-4 Mini (Ollama single-node mode)
-# Usage: bash setup_phi4.sh
+# Beam Node Agent - RunPod Setup Script for MiMo-7B-RL (Ollama single-node mode)
+# Usage: bash setup_mimo.sh
 # -----------------------------------------------------------------------
 
 CONTROL_PLANE_URL="${BEAM_CONTROL_PLANE_URL:-https://www.openbeam.me}"
-OLLAMA_MODEL="${BEAM_OLLAMA_MODEL:-phi4-mini}"
+OLLAMA_MODEL="${BEAM_OLLAMA_MODEL:-alibayram/mimo-7b-rl}"
 
 # Auto-detect GPU specs via nvidia-smi if not set by env vars
 if [ -n "$BEAM_GPU_NAME" ]; then
@@ -36,7 +36,7 @@ fi
 BRANCH="main"
 REPO="https://github.com/beam-open-node/beam_agent"
 
-echo "=== Beam Node Agent Setup (Phi-4 Mini) ==="
+echo "=== Beam Node Agent Setup (MiMo-7B-RL) ==="
 echo "Control plane: $CONTROL_PLANE_URL"
 echo "Model: $OLLAMA_MODEL"
 echo "GPU: $GPU_NAME (${GPU_VRAM}GB x${GPU_COUNT})"
@@ -114,7 +114,7 @@ agent:
     supports_heavy_middle_layers: false
     max_concurrent_jobs: 1
     max_model_class: "P"
-    preferred_model_id: "Microsoft/Phi-4-Mini-Ollama"
+    preferred_model_id: "Xiaomi/MiMo-7B-RL-Ollama"
 EOF
 
 # 8. Write start script

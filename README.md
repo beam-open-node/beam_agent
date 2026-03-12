@@ -26,10 +26,10 @@ Pick the model you want to serve and run the matching one-liner:
 curl -fsSL https://raw.githubusercontent.com/beam-open-node/beam_agent/main/setup_runpod.sh | bash
 ```
 
-### Phi-4 Mini (lightweight reasoning/code, ~2.5 GB VRAM)
+### MiMo-7B-RL (reasoning/math/code, ~4.5 GB VRAM)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/beam-open-node/beam_agent/main/setup_phi4.sh | bash
+curl -fsSL https://raw.githubusercontent.com/beam-open-node/beam_agent/main/setup_mimo.sh | bash
 ```
 
 ### What the Installer Does
@@ -52,7 +52,7 @@ cd beam_agent && bash start_agent.sh
 | Model | Parameters | Active Params | VRAM | Class |
 |---|---|---|---|---|
 | Qwen 3.5 35B-A3B | 35 B (MoE) | ~3 B | ~20 GB | S |
-| Phi-4 Mini | 3.8 B | 3.8 B | ~2.5 GB | P |
+| MiMo-7B-RL | 7 B | 7 B | ~4.5 GB | P |
 
 Coming soon: Kimi K2.5, GLM-5 (reserved, not yet available).
 
@@ -74,7 +74,7 @@ Override any config value with an environment variable. The most common ones:
 |---|---|---|
 | `BEAM_CONTROL_PLANE_URL` | Control plane server URL | `https://www.openbeam.me` |
 | `BEAM_OLLAMA_URL` | Ollama API base URL | `http://localhost:11434` |
-| `BEAM_OLLAMA_MODEL` | Ollama model tag to serve | `qwen3.5:35b-a3b` or `phi4-mini` |
+| `BEAM_OLLAMA_MODEL` | Ollama model tag to serve | `qwen3.5:35b-a3b` or `alibayram/mimo-7b-rl` |
 | `BEAM_GPU_NAME` | GPU name reported to control plane (auto-detected via nvidia-smi) | — |
 | `BEAM_GPU_VRAM_GB` | GPU VRAM in GB (auto-detected) | — |
 | `BEAM_GPU_COUNT` | Number of GPUs (auto-detected) | — |
