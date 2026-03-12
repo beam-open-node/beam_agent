@@ -2,12 +2,12 @@
 set -e
 
 # -----------------------------------------------------------------------
-# Beam Node Agent - RunPod Setup Script for Qwen 3.5 35B-A3B (Ollama single-node mode)
-# Usage: bash setup_runpod.sh
+# Beam Node Agent - RunPod Setup Script for Phi-4 Mini (Ollama single-node mode)
+# Usage: bash setup_phi4.sh
 # -----------------------------------------------------------------------
 
 CONTROL_PLANE_URL="${BEAM_CONTROL_PLANE_URL:-https://www.openbeam.me}"
-OLLAMA_MODEL="${BEAM_OLLAMA_MODEL:-qwen3.5:35b-a3b}"
+OLLAMA_MODEL="${BEAM_OLLAMA_MODEL:-phi4-mini}"
 
 # Auto-detect GPU specs via nvidia-smi if not set by env vars
 if [ -n "$BEAM_GPU_NAME" ]; then
@@ -36,7 +36,7 @@ fi
 BRANCH="main"
 REPO="https://github.com/beam-open-node/beam_agent"
 
-echo "=== Beam Node Agent Setup ==="
+echo "=== Beam Node Agent Setup (Phi-4 Mini) ==="
 echo "Control plane: $CONTROL_PLANE_URL"
 echo "Model: $OLLAMA_MODEL"
 echo "GPU: $GPU_NAME (${GPU_VRAM}GB x${GPU_COUNT})"
@@ -113,7 +113,7 @@ agent:
   capabilities:
     supports_heavy_middle_layers: false
     max_concurrent_jobs: 1
-    preferred_model_id: "Qwen/Qwen3.5-35B-A3B-Ollama"
+    preferred_model_id: "Microsoft/Phi-4-Mini-Ollama"
 EOF
 
 # 8. Write start script
