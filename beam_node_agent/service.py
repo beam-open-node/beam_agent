@@ -991,16 +991,20 @@ class NodeAgent:
         so it has full access to torch, cmath, and all other C-extension stdlib
         modules — none of which are available inside the PyInstaller binary process.
         """
-        # Reasoning models (e.g. MiMo) always need think=True and higher
-        # token limits so the chain-of-thought doesn't consume the entire
-        # output budget before the actual answer is produced.
+        # Reasoning models (e.g. MiMo) embed chain-of-thought in the output,
+        # so they need higher token limits even without explicit think mode.
         is_reasoning = any(kw in self.config.ollama.model_tag.lower()
                            for kw in ("mimo", "deepseek-r1", "qwq"))
-        if is_reasoning:
-            think = True
 
-        default_tokens = 8192 if think else 512
-        cap_tokens = 16384 if think else 512
+        if think:
+            default_tokens = 8192
+            cap_tokens = 16384
+        elif is_reasoning:
+            default_tokens = 4096
+            cap_tokens = 8192
+        else:
+            default_tokens = 512
+            cap_tokens = 512
         max_new_tokens = min(max_tokens if max_tokens and max_tokens > 0 else default_tokens, cap_tokens)
         temp_value = 0.6 if (is_reasoning and temperature is None) else (1.0 if temperature is None else float(temperature))
 
