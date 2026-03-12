@@ -745,7 +745,7 @@ class NodeAgent:
                     backoff = 1.0
                     async for msg in ws:
                         if msg.type == aiohttp.WSMsgType.TEXT:
-                            await self._handle_ws_message(msg.data, ws)
+                            await self._handle_ws_message(msg.data, ws, transport)
                         elif msg.type in (
                             aiohttp.WSMsgType.ERROR,
                             aiohttp.WSMsgType.CLOSED,
@@ -759,7 +759,7 @@ class NodeAgent:
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, 10)
 
-    async def _handle_ws_message(self, raw: str, ws: aiohttp.ClientWebSocketResponse):
+    async def _handle_ws_message(self, raw: str, ws: aiohttp.ClientWebSocketResponse, transport: str = "fast"):
         try:
             payload = json.loads(raw)
         except Exception:
@@ -769,9 +769,9 @@ class NodeAgent:
         if payload.get("type") != "job":
             return
 
-        asyncio.create_task(self._handle_job(payload, ws))
+        asyncio.create_task(self._handle_job(payload, ws, transport))
 
-    async def _handle_job(self, payload: Dict[str, Any], ws: aiohttp.ClientWebSocketResponse):
+    async def _handle_job(self, payload: Dict[str, Any], ws: aiohttp.ClientWebSocketResponse, transport: str = "fast"):
         job_id = payload.get("job_id")
         model_id = payload.get("model_id")
         messages = payload.get("messages") or []
@@ -866,8 +866,8 @@ class NodeAgent:
             for m in (messages or [])
         )
         log.info(
-            "Starting inference: job_id=%s model_id=%s n_messages=%d messages=[%s]",
-            job_id, model_id, len(messages or []), _msg_summary,
+            "Starting inference: job_id=%s model_id=%s transport=%s n_messages=%d messages=[%s]",
+            job_id, model_id, transport, len(messages or []), _msg_summary,
         )
         async with self._inference_lock:
             try:
