@@ -101,7 +101,11 @@ def main():
                     except Exception:
                         continue
 
-                    content = chunk.get("message", {}).get("content", "")
+                    msg_obj = chunk.get("message", {})
+                    thinking = msg_obj.get("thinking", "")
+                    if thinking:
+                        _emit({"type": "thinking", "job_id": job_id, "token": thinking})
+                    content = msg_obj.get("content", "")
                     if content:
                         _emit({"type": "token", "job_id": job_id, "token": content})
 
@@ -988,7 +992,9 @@ class NodeAgent:
         so it has full access to torch, cmath, and all other C-extension stdlib
         modules — none of which are available inside the PyInstaller binary process.
         """
-        max_new_tokens = min(max_tokens if max_tokens and max_tokens > 0 else 512, 512)
+        default_tokens = 8192 if think else 512
+        cap_tokens = 16384 if think else 512
+        max_new_tokens = min(max_tokens if max_tokens and max_tokens > 0 else default_tokens, cap_tokens)
         temp_value = 1.0 if temperature is None else float(temperature)
 
         worker = self._ensure_inference_worker()
@@ -1014,12 +1020,27 @@ class NodeAgent:
 
         threading.Thread(target=_thread, daemon=True).start()
 
+        in_thinking = False
         while True:
             msg = await queue.get()
             mtype = msg.get("type")
-            if mtype == "token":
-                yield msg.get("token", "")
+            if mtype == "thinking":
+                token = msg.get("token", "")
+                if token:
+                    if not in_thinking:
+                        in_thinking = True
+                        token = "<think>" + token
+                    yield token
+            elif mtype == "token":
+                token = msg.get("token", "")
+                if token:
+                    if in_thinking:
+                        in_thinking = False
+                        token = "</think>" + token
+                    yield token
             elif mtype == "done":
+                if in_thinking:
+                    yield "</think>"
                 return
             else:
                 tb = msg.get("traceback", "")
