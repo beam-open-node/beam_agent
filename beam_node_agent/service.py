@@ -405,10 +405,14 @@ class NodeAgent:
                 if not await self._validate_identity():
                     log.warning(
                         "Existing identity %s is no longer valid — "
-                        "clearing and re-registering.",
+                        "clearing state. Please re-pair to reconnect.",
                         self.identity.node_id,
                     )
                     self.identity.clear_state()
+                    # Wait for the user to enter a new pairing code
+                    # before registering again.
+                    self._awaiting_remote_pairing = True
+                    await self._start_remote_pairing_session()
                 else:
                     if self.config.agent.pairing_token:
                         linked, message, status = await self._link_node_with_token(
