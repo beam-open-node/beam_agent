@@ -67,6 +67,7 @@ def main():
         messages = req.get("messages") or []
         max_new_tokens = int(req.get("max_tokens") or req.get("max_new_tokens") or 256)
         temperature = float(req.get("temperature") or 1.0)
+        think_budget = req.get("think_budget")
 
         try:
             think = req.get("think", False)
@@ -85,6 +86,8 @@ def main():
             }
             if model_supports_think:
                 ollama_body["think"] = think
+                if think_budget is not None:
+                    ollama_body["think_budget"] = int(think_budget)
             payload = json.dumps(ollama_body).encode()
 
             url = f"{OLLAMA_URL}/api/chat"
@@ -282,6 +285,7 @@ class _InferenceSubprocess:
         max_new_tokens: int,
         temperature: float,
         think: bool = False,
+        think_budget: Optional[int] = None,
     ) -> Iterator[dict]:
         """
         Send one inference job to the worker and yield response dicts.
@@ -298,14 +302,17 @@ class _InferenceSubprocess:
                 }
                 return
 
-            req = json.dumps({
+            payload = {
                 "job_id": job_id,
                 "model_id": model_id,
                 "messages": messages,
                 "max_new_tokens": max_new_tokens,
                 "temperature": temperature,
                 "think": think,
-            })
+            }
+            if think_budget is not None:
+                payload["think_budget"] = think_budget
+            req = json.dumps(payload)
             assert self._proc.stdin is not None
             try:
                 self._proc.stdin.write(req + "\n")
@@ -1081,6 +1088,13 @@ class NodeAgent:
         max_new_tokens = min(max_tokens if max_tokens and max_tokens > 0 else default_tokens, cap_tokens)
         temp_value = 0.6 if (is_reasoning and temperature is None) else (1.0 if temperature is None else float(temperature))
 
+        # Cap thinking tokens so the model reserves enough budget for the
+        # actual answer.  Allocate at most half the total token budget to
+        # chain-of-thought; the rest is guaranteed for the response.
+        think_budget: Optional[int] = None
+        if think or is_reasoning:
+            think_budget = max_new_tokens // 2
+
         worker = self._ensure_inference_worker()
         queue: asyncio.Queue = asyncio.Queue()
         loop = asyncio.get_running_loop()
@@ -1094,6 +1108,7 @@ class NodeAgent:
                     max_new_tokens=max_new_tokens,
                     temperature=temp_value,
                     think=think,
+                    think_budget=think_budget,
                 ):
                     loop.call_soon_threadsafe(queue.put_nowait, msg)
             except Exception as exc:
