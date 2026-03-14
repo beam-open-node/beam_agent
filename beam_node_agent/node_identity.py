@@ -69,6 +69,17 @@ class NodeIdentity:
             except Exception as e:
                 log.error(f"Failed to load state file {self.state_file}: {e}")
 
+    def clear_state(self):
+        """Remove persisted identity so the next run starts fresh."""
+        self.node_id = None
+        self.node_secret = None
+        if os.path.exists(self.state_file):
+            try:
+                os.remove(self.state_file)
+                log.info("Cleared persisted node identity.")
+            except Exception as e:
+                log.error(f"Failed to remove state file: {e}")
+
     def save_state(self, node_id: str, node_secret: str):
         self.node_id = node_id
         self.node_secret = node_secret

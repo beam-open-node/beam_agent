@@ -142,10 +142,22 @@ class BeamNodeAgent:
                 data=body_json,
                 headers=headers,
             ) as resp:
-                if resp.status != 200:
+                if resp.status == 410:
+                    # Node was removed/deactivated by owner — stop the agent
+                    log.warning(
+                        "Node has been removed from the platform. "
+                        "Please re-pair to reconnect."
+                    )
+                    self.identity.clear_state()
+                    self.node_id = None
+                    self.node_secret = None
+                    raise asyncio.CancelledError()
+                elif resp.status != 200:
                     log.warning(f"Heartbeat rejected: {resp.status}")
                 else:
                     log.debug("Heartbeat ack")
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
             log.error(f"Heartbeat failed: {e}")
 
