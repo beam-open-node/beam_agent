@@ -26,6 +26,12 @@ Pick the model you want to serve and run the matching one-liner:
 curl -fsSL https://raw.githubusercontent.com/beam-open-node/beam_agent/main/setup_runpod.sh | bash
 ```
 
+### Qwen 3.5 27B (high-quality dense model, ~14 GB VRAM)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/beam-open-node/beam_agent/main/setup_qwen27b.sh | bash
+```
+
 ### MiMo-7B-RL (reasoning/math/code, ~4.5 GB VRAM)
 
 ```bash
@@ -53,6 +59,7 @@ cd beam_agent && bash start_agent.sh
 |---|---|---|---|---|
 | MiMo-7B-RL | 7 B | 7 B | ~4.5 GB | A |
 | Qwen 3.5 35B-A3B | 35 B (MoE) | ~3 B | ~20 GB | B |
+| Qwen 3.5 27B | 27 B (dense) | 27 B | ~14 GB | C |
 
 Coming soon: Kimi K2.5, GLM-5 (reserved, not yet available).
 
